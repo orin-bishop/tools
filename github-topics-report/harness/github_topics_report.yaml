@@ -1,0 +1,160 @@
+# =============================================================================
+# GitHub Topics Report - Harness pipeline
+#
+# Stage layout (all in one CI stage so steps share the workspace and ./out):
+#   1. generate_report      Run step: inventory -> enrich -> classify -> render
+#   2. publish_confluence   Step TEMPLATE  (fill in templateRef + inputs)
+#   3. send_email           Step TEMPLATE  (fill in templateRef + inputs), conditional
+#
+# Search for REPLACE_ - each one needs a value from your Harness account.
+# Assumes this project lives in ./github-topics-report inside the info-reports repo.
+# =============================================================================
+pipeline:
+  name: GitHub Topics Report
+  identifier: github_topics_report
+  projectIdentifier: REPLACE_PROJECT_ID
+  orgIdentifier: REPLACE_ORG_ID
+  tags:
+    report: github
+  properties:
+    ci:
+      codebase:
+        connectorRef: REPLACE_GIT_CONNECTOR      # connector for the info-reports repo
+        repoName: info-reports
+        build: <+input>
+  variables:
+    - name: GH_ORGS
+      type: String
+      description: Comma-separated GitHub org(s) to scan
+      required: true
+      value: <+input>
+    - name: LOOKBACK_MONTHS
+      type: String
+      description: How far back team-member activity counts
+      required: true
+      value: "6"
+    - name: EMAIL_RECIPIENTS
+      type: String
+      description: Comma-separated. Start with the test group, not the full team.
+      required: true
+      value: <+input>
+    - name: EMAIL_MODE
+      type: String
+      description: always = email every run; on_drift = only when something needs action
+      required: true
+      value: <+input>.default(on_drift).allowedValues(always,on_drift)
+    - name: EMAIL_TEST_MODE
+      type: String
+      description: "true adds a TEST SEND banner and [TEST] subject prefix"
+      required: true
+      value: <+input>.default(true).allowedValues(true,false)
+    - name: CONFLUENCE_PAGE_ID
+      type: String
+      description: Numeric id of the existing Confluence page to overwrite
+      required: true
+      value: <+input>
+    - name: CONFLUENCE_PAGE_URL
+      type: String
+      description: Full URL of that page (linked from the email)
+      required: true
+      value: <+input>
+  stages:
+    - stage:
+        name: Build and publish report
+        identifier: build_and_publish_report
+        description: Query GitHub, classify repos, publish to Confluence, notify by email
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud            # TODO: swap for your Kubernetes / VM infrastructure block if self-hosted
+            spec: {}
+          execution:
+            steps:
+              # ------------------------------------------------------------------
+              # 1. Generate the report (all the real work happens in scripts/)
+              # ------------------------------------------------------------------
+              - step:
+                  type: Run
+                  name: Generate report
+                  identifier: generate_report
+                  timeout: 45m
+                  spec:
+                    connectorRef: REPLACE_DOCKER_CONNECTOR   # any registry connector that can pull python:3.12-slim
+                    image: python:3.12-slim
+                    shell: Bash
+                    command: |-
+                      set -euo pipefail
+                      cd github-topics-report
+                      pip install --quiet -r requirements.txt
+                      bash scripts/run_report.sh
+                      # Exported so the email step can decide whether to run (see outputVariables).
+                      export NEEDS_ACTION="$(cat out/needs_action.txt)"
+                    envVariables:
+                      GITHUB_TOKEN: <+secrets.getValue("github_report_token")>   # TODO: your read-only token/app secret
+                      # GITHUB_API_URL: https://ghe.example.com/api/v3            # uncomment for GitHub Enterprise Server
+                      # Manifest repo can also be set in config/teams.yml (settings.manifest). The token must read it.
+                      # MANIFEST_REPO: my-org/repo-downloader
+                      # MANIFEST_PATH: repos.json
+                      GH_ORGS: <+pipeline.variables.GH_ORGS>
+                      LOOKBACK_MONTHS: <+pipeline.variables.LOOKBACK_MONTHS>
+                      CONFLUENCE_PAGE_URL: <+pipeline.variables.CONFLUENCE_PAGE_URL>
+                      EMAIL_TEST_MODE: <+pipeline.variables.EMAIL_TEST_MODE>
+                      EMAIL_SUBJECT_PREFIX: '<+<+pipeline.variables.EMAIL_TEST_MODE> == "true" ? "[TEST] " : "">'
+                    outputVariables:
+                      - name: NEEDS_ACTION
+                        type: String
+                        value: NEEDS_ACTION
+
+              # ------------------------------------------------------------------
+              # 2. Publish to Confluence via your existing step template.
+              #    Body to publish : github-topics-report/out/confluence.html  (storage format)
+              #    Page to update  : <+pipeline.variables.CONFLUENCE_PAGE_ID>
+              #    Adjust templateInputs to match your template's input schema.
+              #    Fallback without a template: python github-topics-report/scripts/publish_confluence.py
+              # ------------------------------------------------------------------
+              - step:
+                  type: Template
+                  name: Publish to Confluence
+                  identifier: publish_confluence
+                  template:
+                    templateRef: REPLACE_CONFLUENCE_TEMPLATE
+                    versionLabel: REPLACE_TEMPLATE_VERSION
+                    templateInputs:
+                      type: Run
+                      spec:
+                        envVariables:
+                          CONFLUENCE_PAGE_ID: <+pipeline.variables.CONFLUENCE_PAGE_ID>
+                          REPORT_HTML: github-topics-report/out/confluence.html
+
+              # ------------------------------------------------------------------
+              # 3. Email via your existing step template - only when there is something
+              #    to act on, unless EMAIL_MODE=always.
+              #    HTML body : github-topics-report/out/email.html
+              #    Subject   : github-topics-report/out/email_subject.txt
+              #    To        : <+pipeline.variables.EMAIL_RECIPIENTS>
+              #    Fallback without a template: python github-topics-report/scripts/send_email.py
+              # ------------------------------------------------------------------
+              - step:
+                  type: Template
+                  name: Send email
+                  identifier: send_email
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.variables.EMAIL_MODE> == "always" || <+execution.steps.generate_report.output.outputVariables.NEEDS_ACTION> == "true"
+                  template:
+                    templateRef: REPLACE_EMAIL_TEMPLATE
+                    versionLabel: REPLACE_TEMPLATE_VERSION
+                    templateInputs:
+                      type: Run
+                      spec:
+                        envVariables:
+                          EMAIL_RECIPIENTS: <+pipeline.variables.EMAIL_RECIPIENTS>
+                          EMAIL_HTML_FILE: github-topics-report/out/email.html
+                          EMAIL_SUBJECT_FILE: github-topics-report/out/email_subject.txt
+
+              # Optional: keep the CSVs / suggestions / raw JSON as build artifacts, e.g. with an
+              # "Upload Artifacts to S3/GCS" step pointed at github-topics-report/out/*.

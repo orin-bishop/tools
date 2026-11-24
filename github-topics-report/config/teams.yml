@@ -1,0 +1,72 @@
+# =============================================================================
+# Registry for the GitHub topics report.
+#
+# This file is the human-maintained "what we believe" list. GitHub topics are
+# "what is actually tagged". The report is mostly the diff between the two.
+#
+#   repos:    repos we KNOW belong to the team (full names: org/repo).
+#   exclude:  repos reviewed and confirmed NOT ours - stops repeat false positives.
+#   members:  GitHub logins. Merged with the live membership of `github_team`.
+#
+# Add a new team by copying a block. No code changes needed.
+# =============================================================================
+
+settings:
+  orgs:
+    - my-org                    # TODO: your GitHub org(s). Override with GH_ORGS=a,b
+  lookback_months: 6            # how far back member activity counts
+  skip_forks: true
+  skip_archived: true
+  include_stale: true           # still score repos with no push in the window (name/access signals only)
+  ignore_repos: []              # globs that are never relevant, e.g. "my-org/sandbox-*"
+
+  # ---------------------------------------------------------------------------
+  # Manifest: the JSON kept by the "download every repo, team by team" repo.
+  #   - its repos are merged into each team's registry (teams.yml `repos:` still works alongside)
+  #   - its per-repo topics (and master topic list, if any) are compared with GitHub
+  # Layout is auto-detected; only set the *_key / *_path overrides if parsing finds 0 repos or
+  # the wrong thing. Env overrides: MANIFEST_REPO, MANIFEST_PATH, MANIFEST_REF, MANIFEST_FILE.
+  # ---------------------------------------------------------------------------
+  manifest:
+    enabled: false                  # TODO: set true once repo/path below are right
+    required: true                  # false = report anyway if the manifest can't be read
+    source: github                  # github | file
+    repo: my-org/repo-downloader    # TODO: org/repo holding the JSON
+    path: repos.json                # TODO
+    ref: main
+    # file: ./repos.json            # source: file - handy for local runs
+    # teams_path: teams             # dotted path to the team container
+    # repos_key: repos              # key holding a team's repo list
+    # team_key: team                # flat layout: key naming the team on each repo record
+    # name_key: full_name           # key naming a repo
+    # topics_key: topics            # key holding a repo's topics
+    # topic_list_path: topics       # dotted path to the master topic list
+    # team_map:                     # manifest team name -> teams.yml key
+    #   platform-pet: pet
+
+  # Optional tuning - defaults live in scripts/reportlib.py
+  # thresholds: {high: 7, medium: 4, low: 2}
+  # weights: {name_match: 4, team_admin: 5}
+
+teams:
+  pet:
+    display_name: PET
+    topic: pet                  # the GitHub topic every team repo must carry
+    github_team: my-org/pet     # TODO: org/team-slug. Enables member list + repo-access signals. Remove if none.
+    # name_patterns:            # default matches 'pet' as a delimited token: pet-api, api-pet, pets
+    #   - '(?:^|[-_.])pet(?:s)?(?:$|[-_.])'
+    # keywords: [pet]           # words that count in descriptions / READMEs (default: [topic])
+    # codeowners_handles: ["@my-org/pet"]   # extra CODEOWNERS handles (github_team is added automatically)
+    members:
+      - example-login-1         # TODO
+      - example-login-2
+    repos: []                   # TODO: paste your starter pet list here, e.g. - my-org/pet-api
+    exclude: []
+
+  viz:
+    display_name: Viz
+    topic: viz
+    # github_team: my-org/viz
+    members: []
+    repos: []                   # TODO: starter list of viz repos
+    exclude: []
