@@ -1,0 +1,397 @@
+set -eu
+: "${WB_TITLE:?WB_TITLE is required}"
+: "${WB_FILES:?WB_FILES is required: one 'path | description' per line}"
+OUT="${WB_OUTPUT:-workbook.xlsx}"
+
+# openpyxl is the only dependency (install from the internal package index if the image lacks it)
+python3 -c "import openpyxl" 2>/dev/null || pip install --quiet openpyxl
+
+python3 - <<'PY'
+import csv, datetime as dt, html, io, math, os, re, subprocess, sys, tempfile
+from html.parser import HTMLParser
+import openpyxl
+from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE as BAD
+from openpyxl.formatting.rule import FormulaRule
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import column_index_from_string as colnum, get_column_letter as col
+from openpyxl.utils.indexed_list import IndexedList
+from openpyxl.worksheet.hyperlink import Hyperlink
+from openpyxl.worksheet.properties import PageSetupProperties
+
+env, VERSION = os.environ.get, "1.1.0"
+csv.field_size_limit(2**31 - 1)
+
+def die(msg):
+    sys.exit("ERROR: " + msg)
+
+# ---- look and feel: DEFAULTS. Change them here, or per run through the WB_OPTIONS input --------------
+OPT = {"font": "Arial", "font_size": "10", "header_fill": "1F3864", "header_font": "FFFFFF", "header_bold": "on",
+       "freeze_rows": "1", "freeze_cols": "0", "filter": "on", "max_col_width": "60", "date_format": "yyyy-mm-dd"}
+PALETTE = {"red": ("FFC7CE", "9C0006"), "yellow": ("FFEB9C", "9C5700"), "green": ("C6EFCE", "006100"),
+           "blue": ("BDD7EE", "1F3864"), "orange": ("F8CBAD", "833C0B"), "gray": ("D9D9D9", "404040")}
+OPS = ("=", "==", "!=", "<>", ">", "<", ">=", "<=", "contains")
+HEX = re.compile(r"[0-9A-Fa-f]{6}")
+rules = []                                   # (tab or *, column, operator, value, fill, font colour, colour as typed)
+for line in (env("WB_OPTIONS") or "").splitlines():
+    line = line.split(" #")[0].strip()       # '#' starts a comment
+    if not line or line.startswith("#"):
+        continue
+    if line.lower().startswith("highlight:"):    # highlight: tab | column | operator | value | colour
+        f = [x.strip() for x in line[10:].split("|")]
+        if len(f) == 5 and f[2].lower() in OPS and (f[4].lower() in PALETTE or HEX.fullmatch(f[4])):
+            fill, ink = PALETTE.get(f[4].lower(), (f[4].upper(), None))
+            rules.append((f[0].lower(), f[1], f[2].lower(), f[3], fill, ink, f[4]))
+        else:
+            print("WARN: ignored highlight rule: " + line)
+    else:
+        k, _, v = line.partition("=")
+        if k.strip().lower() in OPT:
+            OPT[k.strip().lower()] = v.strip()
+        else:
+            print("WARN: unknown option ignored: " + line)
+
+def on(k):
+    return OPT[k].lower() in ("on", "true", "yes", "1")
+
+def num(k, default):
+    try:
+        return max(0, int(OPT[k]))
+    except ValueError:
+        print("WARN: option %s must be a whole number, using %s" % (k, default))
+        return default
+
+for k in ("header_fill", "header_font"):
+    if not HEX.fullmatch(OPT[k]):
+        print("WARN: option %s must be a 6-digit hex colour, using the default" % k)
+        OPT[k] = {"header_fill": "1F3864", "header_font": "FFFFFF"}[k]
+ACCENT, FRZ_R, FRZ_C, MAXW = OPT["header_fill"].upper(), num("freeze_rows", 1), num("freeze_cols", 0), num("max_col_width", 60)
+
+# ---- inputs (all come from the step's own env variables) ---------------------------------------------
+title, out = env("WB_TITLE"), env("WB_OUTPUT") or "workbook.xlsx"
+purpose = env("WB_PURPOSE") or "(purpose not provided)"
+if not out.lower().endswith(".xlsx"):
+    die("WB_OUTPUT must end in .xlsx")
+entries = []                      # (source, description); 'manual: Name | text' = tab you will add by hand later
+for line in (env("WB_FILES") or "").splitlines():
+    line = line.strip()
+    if line and not line.startswith("#"):
+        src, _, desc = line.partition("|")
+        entries.append((src.strip(), desc.strip()))
+if not entries:
+    die("WB_FILES is empty")
+notes_raw = env("WB_NOTES") or ""
+if notes_raw.startswith("@"):                                 # '@path/to/notes.html' reads the notes from a file
+    try:
+        notes_raw = open(notes_raw[1:].strip(), encoding="utf-8", errors="replace").read()
+    except OSError:
+        die("WB_NOTES file not found: " + notes_raw[1:])
+
+now = dt.datetime.now(dt.timezone.utc)
+local = now
+try:
+    from zoneinfo import ZoneInfo
+    local = now.astimezone(ZoneInfo(env("WB_TZ") or "UTC"))
+except Exception:
+    print("WARN: WB_TZ not usable, showing UTC")
+
+# ---- helpers ------------------------------------------------------------------------------------------
+used = {"overview", "table of contents"}
+def tab_for(name):                # Excel tab rules: <=31 chars, no []:*?/\, unique, not 'History'
+    n = re.sub(r"[\[\]:*?/\\]", "_", name).strip(" '")[:31] or "Sheet"
+    cand, i = n, 2
+    while cand.lower() in used or cand.lower() == "history":
+        s = "_%d" % i
+        cand, i = n[:31 - len(s)] + s, i + 1
+    used.add(cand.lower())
+    return cand
+
+INT, FLT, DAT, THO = (re.compile(p) for p in (r"-?(0|[1-9][0-9]{0,14})", r"-?(0|[1-9][0-9]*)\.[0-9]+",
+                                              r"[0-9]{4}-[0-9]{2}-[0-9]{2}", r"-?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?"))
+def conv(v):                      # text -> real numbers/dates; leading zeros, long ids and '=...' stay text
+    if v == "":
+        return None
+    if INT.fullmatch(v):
+        return int(v)
+    if FLT.fullmatch(v):
+        return float(v)
+    if THO.fullmatch(v):          # 1,234.50
+        v2 = v.replace(",", "")
+        return float(v2) if "." in v2 else int(v2)
+    if DAT.fullmatch(v):
+        try:
+            return dt.date.fromisoformat(v)
+        except ValueError:
+            pass
+    return BAD.sub("", v)[:32767]
+
+class Tables(HTMLParser):         # pulls <table>s (and any loose page text) out of an HTML file
+    def __init__(s):
+        super().__init__(convert_charrefs=True)
+        s.tables, s.text, s.d, s.row, s.cell, s.skip = [], [], 0, None, None, 0
+    def handle_starttag(s, tag, a):
+        if tag in ("script", "style"):
+            s.skip += 1
+        elif tag == "table":
+            s.d += 1
+            if s.d == 1:
+                s.tables.append([])
+        elif s.d == 1 and tag == "tr":
+            s.row = []
+        elif s.d == 1 and tag in ("td", "th") and s.row is not None:
+            s.cell = []
+        elif tag == "br" and s.cell is not None:
+            s.cell.append(" ")
+        elif tag in ("br", "p", "div", "li") and s.d == 0:
+            s.text.append("\n")
+    def handle_endtag(s, tag):
+        if tag in ("script", "style"):
+            s.skip = max(0, s.skip - 1)
+        elif tag == "table":
+            s.d = max(0, s.d - 1)
+        elif s.d == 1 and tag in ("td", "th") and s.cell is not None:
+            s.row.append(re.sub(r"\s+", " ", "".join(s.cell)).strip())
+            s.cell = None
+        elif s.d == 1 and tag == "tr" and s.row is not None:
+            if s.row:
+                s.tables[-1].append(s.row)
+            s.row = None
+    def handle_data(s, t):
+        if not s.skip:
+            (s.cell if s.cell is not None else s.text if s.d == 0 else []).append(t)
+
+def load(path, ext):              # file -> list of tables; a table is a list of rows
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+        raw = f.read()
+    if ext in (".csv", ".tsv"):
+        return [list(csv.reader(io.StringIO(raw, newline=""), delimiter="\t" if ext == ".tsv" else ","))]
+    if ext in (".html", ".htm"):
+        p = Tables()
+        p.feed(raw)
+        p.close()
+        if [t for t in p.tables if t]:
+            return [t for t in p.tables if t]
+        raw = "".join(p.text)                                # no tables: keep the page text, one line per row
+    lines = [x.strip("\r") for x in raw.splitlines() if x.strip()]
+    if lines and "\t" in lines[0]:                           # a tab-delimited .txt behaves like a .tsv
+        return [[x.split("\t") for x in lines]]
+    return [[["text"]] + [[x] for x in lines]]
+
+def flat(s):                      # Excel cannot render HTML: keep the text, bullets and link URLs
+    s = re.sub(r"(?is)<(script|style).*?</\1>", "", s)
+    s = re.sub(r'(?is)<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', r"\2 (\1)", s)
+    s = re.sub(r"(?i)<li[^>]*>", "\n\u2022 ", s)
+    s = re.sub(r"(?i)</?(p|div|ul|ol|br|h[1-6]|tr)[^>]*>", "\n", s)
+    return html.unescape(re.sub(r"<[^>]+>", "", s))
+
+def rule_formula(ref, op, val):   # numbers compare as numbers only; blanks and text never match by accident
+    isnum = bool(re.fullmatch(r"-?[0-9]+(\.[0-9]+)?", val))
+    lit = val if isnum else '"%s"' % val.replace('"', '""')
+    if op == "contains":
+        return "ISNUMBER(SEARCH(%s,%s))" % ('"%s"' % val.replace('"', '""'), ref)
+    return "AND(%s(%s),%s%s%s)" % ("ISNUMBER" if isnum else "ISTEXT", ref, ref, {"==": "=", "!=": "<>"}.get(op, op), lit)
+
+# ---- front tabs first, then one tab per input table ------------------------------------------------
+wb = Workbook()
+wb._fonts = IndexedList([Font(name=OPT["font"], size=num("font_size", 10))])      # default font for every tab
+ov = wb.active
+ov.title = "Overview"
+toc = wb.create_sheet("Table of Contents")
+pages, work, hit = [], tempfile.mkdtemp(), set()
+for src, desc in entries:
+    if src.lower().startswith("manual:"):
+        pages.append((tab_for(src[7:].strip() or "Manual"), desc, "Added manually", None, None))
+        continue
+    path = src
+    if src.startswith("s3://"):                              # uses the step's existing AWS access
+        path = os.path.join(work, os.path.basename(src))
+        try:
+            subprocess.run(["aws", "s3", "cp", "--only-show-errors", src, path], check=True)
+        except (OSError, subprocess.CalledProcessError) as e:
+            die("could not fetch %s (%s)" % (src, e))
+    ext = os.path.splitext(path)[1].lower()
+    if not os.path.isfile(path):
+        die("input file not found: " + src)
+    if ext not in (".csv", ".tsv", ".txt", ".html", ".htm"):
+        die("supported inputs are .csv .tsv .txt .html .htm: " + src)
+    tables = load(path, ext)
+    for j, rows in enumerate(tables, 1):
+        if len(rows) > 1048575:
+            die("%s has %d rows; Excel allows 1,048,575 per tab" % (src, len(rows)))
+        tag = " (table %d of %d)" % (j, len(tables)) if len(tables) > 1 else ""
+        tab = tab_for(os.path.splitext(os.path.basename(src))[0])      # tab name = file name without extension
+        ws, texty, ncols = wb.create_sheet(tab), [], max((len(r) for r in rows), default=0)
+        for r, row in enumerate(rows, 1):
+            vals = [BAD.sub("", c)[:32767] for c in row] if r == 1 else [conv(c) for c in row]
+            ws.append(vals)
+            texty += [(r, c) for c, v in enumerate(vals, 1) if isinstance(v, str) and v.startswith("=")]
+        for r, c in texty:                                   # '=...' text must never become a formula
+            ws.cell(r, c).data_type = "s"
+        for row in ws.iter_rows(min_row=2):
+            for c in row:
+                if isinstance(c.value, dt.date):
+                    c.number_format = OPT["date_format"]
+        for c in (ws[1] if rows else ()):                    # heading row: its own look
+            c.font = Font(name=OPT["font"], size=num("font_size", 10), bold=on("header_bold"), color=OPT["header_font"])
+            c.fill = PatternFill("solid", fgColor=ACCENT)
+            c.alignment = Alignment(vertical="center")
+        for i in range(1, ncols + 1):
+            w = max((len(r[i - 1]) for r in rows[:200] if len(r) >= i), default=8)
+            ws.column_dimensions[col(i)].width = min(MAXW, max(8, w + 2))
+        if rows and (FRZ_R or FRZ_C):                        # keep headings (and optionally first columns) in view
+            ws.freeze_panes = "%s%d" % (col(FRZ_C + 1), FRZ_R + 1)
+        if on("filter") and len(rows) > 1:                   # dropdown arrows: sort and filter every column
+            ws.auto_filter.ref = "A1:%s%d" % (col(ncols), len(rows))
+        for n, (rt, rc, op, val, fill, ink, lab) in enumerate(rules):    # highlight rules for this tab
+            if rt not in ("*", tab.lower()) or not rows:
+                continue
+            heads = [str(h).strip().lower() for h in rows[0]]
+            idx = heads.index(rc.lower()) + 1 if rc.lower() in heads else (colnum(rc.upper()) if re.fullmatch(r"[A-Za-z]{1,2}", rc) else 0)
+            if not 1 <= idx <= ncols:
+                continue
+            hit.add(n)
+            L = col(idx)
+            ws.conditional_formatting.add("%s2:%s%d" % (L, L, max(len(rows), 2)), FormulaRule(
+                formula=[rule_formula(L + "2", op, val)], fill=PatternFill(start_color=fill, end_color=fill, fill_type="solid"),
+                font=Font(color=ink) if ink else None))
+        pages.append((tab, (desc + tag).strip() if desc else "", src + tag, max(len(rows) - 1, 0), ncols))
+if not any(p[3] is not None for p in pages):
+    die("no data files were listed (only manual entries)")
+for n, (rt, rc, op, val, fill, ink, lab) in enumerate(rules):
+    if n not in hit:
+        print("WARN: highlight rule matched no tab/column: %s | %s | %s | %s" % (rt, rc, op, val))
+
+# ---- Overview + Table of Contents ----------------------------------------------------------------------
+def put(ws, r, c, v, merge=0, **kw):
+    cell = ws.cell(r, c, v)
+    cell.font = Font(name=OPT["font"], size=kw.get("size", 10), bold=kw.get("bold", False), italic=kw.get("italic", False),
+                     color=kw.get("color"), underline=kw.get("ul"))
+    cell.alignment = Alignment(wrap_text=True, vertical="top", horizontal=kw.get("h"))
+    if kw.get("fill"):
+        for cc in range(c, (merge or c) + 1):
+            ws.cell(r, cc).fill = PatternFill("solid", fgColor=kw["fill"])
+    if merge:
+        ws.merge_cells(start_row=r, start_column=c, end_row=r, end_column=merge)
+    return cell
+
+def fit(ws, r, text, width):
+    lines = sum(max(1, math.ceil(len(p) / (width * 0.95))) for p in str(text).split("\n"))
+    ws.row_dimensions[r].height = max(16, 13.5 * lines + 3)
+
+def link(ws, r, c, text, target, **kw):
+    cell = put(ws, r, c, text, color="0563C1", ul="single", **kw)
+    cell.hyperlink = Hyperlink(ref=cell.coordinate, location="'%s'!A1" % target.replace("'", "''"), display=text)
+    return cell
+
+def section(ws, r, text):
+    put(ws, r, 1, text, merge=6, bold=True, color=ACCENT, fill="D9E2F3")
+
+def setup(ws, heading):
+    for letter, w in zip("ABCDEF", (5, 32, 62, 44, 11, 10)):
+        ws.column_dimensions[letter].width = w
+    ws.sheet_view.showGridLines = False
+    ws.sheet_properties.tabColor = ACCENT
+    ws.page_setup.orientation, ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = "landscape", 1, 0
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)      # prints/exports one page wide
+    put(ws, 1, 1, heading, merge=6, size=18, bold=True, color=ACCENT)
+    ws.row_dimensions[1].height = 30
+    put(ws, 2, 1, env("WB_CLASSIFICATION") or "INTERNAL USE ONLY \u2014 Via Logic LLC", merge=6, size=9, bold=True, color="C00000")
+
+# Overview: what this workbook is and how to use it
+setup(ov, title)
+r = 4
+section(ov, r, "About this workbook")
+facts = [("Purpose", purpose),
+         ("Report generated", "%s   (UTC %s)" % (local.strftime("%Y-%m-%d %H:%M:%S %Z"), now.strftime("%Y-%m-%dT%H:%M:%SZ"))),
+         ("Pipeline", "%s  \u00b7  run #%s  \u00b7  triggered by %s" % (env("PIPELINE_NAME") or "n/a", env("PIPELINE_BUILD_NUMBER") or "n/a", env("TRIGGERED_BY") or "n/a")),
+         ("Built with", "workbook-publish step template v%s  \u00b7  Python %s  \u00b7  openpyxl %s" % (VERSION, sys.version.split()[0], openpyxl.__version__))]
+shown = [x for n, x in enumerate(rules) if n in hit]            # only rules that matched something
+for label, value in facts:
+    r += 1
+    put(ov, r, 2, label, bold=True)
+    put(ov, r, 3, value, merge=6)
+    fit(ov, r, value, 127)
+url = env("PIPELINE_EXECUTION_URL") or ""
+if url.startswith("http"):
+    r += 1
+    put(ov, r, 2, "Pipeline run", bold=True)
+    put(ov, r, 3, "Open this pipeline run", merge=6, color="0563C1", ul="single").hyperlink = url
+r += 2
+section(ov, r, "How to use this workbook")
+r += 1
+put(ov, r, 2, "Find a tab", bold=True)
+link(ov, r, 3, "Go to the Table of Contents \u2192 click a tab name to jump to it", "Table of Contents", merge=6)
+tips = []
+if FRZ_R:
+    tips.append(("Headings", "The top row of every data tab stays in view while you scroll." if FRZ_R == 1
+                 else "The top %d rows of every data tab stay in view while you scroll." % FRZ_R))
+if on("filter"):
+    tips.append(("Sort and filter", "Use the arrow on any column heading to sort it, or to show only the values you pick."))
+tips.append(("Values", "Numbers and dates are real Excel values, so you can total, chart and pivot them."))
+if shown:
+    tips.append(("Colours", "Highlighted cells follow the rules listed below. They update if you edit a value."))
+for label, text in tips:
+    r += 1
+    put(ov, r, 2, label, bold=True)
+    put(ov, r, 3, text, merge=6)
+    fit(ov, r, text, 127)
+notes = [x.strip() for x in flat(notes_raw).splitlines() if x.strip()]
+if notes:
+    r += 2
+    section(ov, r, "Notes")
+    for text in notes:
+        r += 1
+        put(ov, r, 2, text, merge=6)
+        fit(ov, r, text, 159)
+if shown:
+    r += 2
+    section(ov, r, "Highlight rules")
+    r += 1
+    for c, h in enumerate(("", "Tab", "When this column\u2026", "Cell colour"), 1):
+        put(ov, r, c, h, bold=True, color=OPT["header_font"], fill=ACCENT)
+    for rt, rc, op, val, fill, ink, lab in shown:
+        r += 1
+        put(ov, r, 2, "all tabs" if rt == "*" else rt)
+        put(ov, r, 3, "%s  %s  %s" % (rc, op, val))
+        put(ov, r, 4, lab, color=ink, fill=fill)
+
+# Table of Contents: every tab, clickable, with a short explanation
+setup(toc, "Table of Contents")
+link(toc, 3, 1, "\u2190 Overview", "Overview", merge=3)
+r = 5
+for c, h in enumerate(("#", "Tab (click to open)", "What it is used for", "Source", "Rows", "Columns"), 1):
+    put(toc, r, c, h, bold=True, color=OPT["header_font"], fill=ACCENT, h="center" if c in (1, 5, 6) else None)
+for n, (tab, desc, src, nrows, ncols) in enumerate(pages, 1):
+    r += 1
+    if not desc:
+        print("WARN: no description for tab '%s'" % tab)
+    for c, v in enumerate((n, None, desc or "(description not provided)", src, nrows, ncols), 1):
+        if c != 2:
+            put(toc, r, c, v, italic=(c == 3 and not desc) or (c == 4 and nrows is None), h="center" if c in (1, 5, 6) else None,
+                fill="F2F2F2" if n % 2 == 0 else None)
+    link(toc, r, 2, tab, tab, fill="F2F2F2" if n % 2 == 0 else None)
+    fit(toc, r, max(desc or "(description not provided)", src, key=len), 50)
+r += 2
+put(toc, r, 1, "Generated by the workbook-publish Harness step template. Change the step inputs and re-run; edits made in the Overview "
+               "and this tab are overwritten. Row and column counts are a snapshot taken at generation time.", merge=6, size=8, italic=True, color="7F7F7F")
+toc.row_dimensions[r].height = 24
+
+# ---- save + self-check -----------------------------------------------------------------------------------
+wb.properties.title, wb.properties.subject, wb.properties.creator = title, purpose, "Via Logic LLC"
+wb.properties.description = "Generated %s by workbook-publish v%s. INTERNAL USE ONLY" % (now.strftime("%Y-%m-%dT%H:%M:%SZ"), VERSION)
+os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+wb.save(out + ".tmp")
+os.replace(out + ".tmp", out)                                # never leave a half-written file
+chk = openpyxl.load_workbook(out, read_only=True)
+names = chk.sheetnames
+chk.close()
+if names[:2] != ["Overview", "Table of Contents"] or len(names) != 2 + sum(p[3] is not None for p in pages):
+    die("self-check failed, tabs found: %s" % names)
+print("Wrote %s: Overview, Table of Contents + %d data tab(s)" % (out, len(names) - 2))
+for tab, desc, src, nrows, ncols in pages:
+    print("  %-31s %s" % (tab, "manual" if nrows is None else "%d rows x %d cols" % (nrows, ncols)))
+PY
+
+WORKBOOK_PATH="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
+export WORKBOOK_PATH
+echo "WORKBOOK_PATH=$WORKBOOK_PATH"

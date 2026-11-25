@@ -1,0 +1,37 @@
+# MADE-UP SAMPLE for tests and demos. Nothing here comes from a real program.
+#
+# On the Fed side this file is drafted from the real context repo (the program metrics repo),
+# and a person confirms every hint before it is used. A hint is a short, plain starting point for
+# a kind of story the team meets often: why it matters, a few checks, and questions to ask.
+#
+# Each hint needs:   name, words
+# Each hint may have: so_that, acceptance_criteria, questions
+hints_version: 1
+hints:
+  - name: Add a dashboard
+    words: [dashboard]
+    so_that: "the team can see the numbers without asking someone"
+    acceptance_criteria:
+      - "The dashboard shows the numbers named in the story"
+      - "The dashboard updates on a schedule the team agreed"
+    questions:
+      - "Which numbers go on the dashboard, and who looks at it?"
+
+  - name: Add an alert
+    words: [alert]
+    so_that: "the right people hear about a problem quickly"
+    acceptance_criteria:
+      - "An alert is sent when the problem happens"
+      - "The alert says what failed and who should look"
+    questions:
+      - "What counts as a problem, and who should get the alert?"
+
+  - name: Rotate credentials
+    words: ["rotate credentials", "rotate keys", "rotate key", "rotate secret"]
+    so_that: "old credentials stop working"
+    acceptance_criteria:
+      - "New credentials are in use"
+      - "The old credentials no longer work"
+      - "The services that use them still run"
+    questions:
+      - "Which services use these credentials, and who has to change them?"

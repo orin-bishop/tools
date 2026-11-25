@@ -1,0 +1,465 @@
+{
+  "note": "Made-up data for tests and demos. Nothing here comes from a real Jira.",
+  "stories": [
+    {
+      "key": "DEMO-1",
+      "summary": "Add health check to demo service",
+      "description": "As a platform engineer, I want a health check endpoint on the demo service, so that the pipeline can confirm the service is up before it sends traffic.",
+      "acceptance_criteria": "* The /health endpoint returns 200 when the service is up\n* The /health endpoint returns 503 when the database is unreachable",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Looks good",
+      "extra": {
+        "Priority": "High",
+        "Reporter": "Sample Person B",
+        "Created": "2026-10-02",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-2",
+      "summary": "Add alert for failed deployments",
+      "description": "",
+      "acceptance_criteria": "* An alert is sent when a deployment fails\n* The alert names the failed service",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Missing info",
+      "extra": {
+        "Priority": "Low",
+        "Reporter": "Sample Person C",
+        "Created": "2026-10-03",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-3",
+      "summary": "Create dashboard for build times",
+      "description": "As a platform engineer, I want a dashboard of build times, so that I can see which builds are slow.",
+      "acceptance_criteria": "",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Missing info",
+      "extra": {
+        "Priority": "Medium",
+        "Reporter": "Sample Person A",
+        "Created": "2026-10-04",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-4",
+      "summary": "Rotate demo API keys every 90 days",
+      "description": "As a platform engineer, I want the demo API keys rotated every 90 days, so that old keys stop working.",
+      "acceptance_criteria": "TBD",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform",
+        "tooling"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Needs review",
+      "extra": {
+        "Priority": "High",
+        "Reporter": "Sample Person B",
+        "Created": "2026-10-05",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-5",
+      "summary": "Add retry to the notification sender",
+      "description": "As a platform engineer, I want the notification sender to retry failed sends, so that short outages do not lose messages.",
+      "acceptance_criteria": "Works as expected and should work fine.",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Needs review",
+      "extra": {
+        "Priority": "Low",
+        "Reporter": "Sample Person C",
+        "Created": "2026-10-06",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-6",
+      "summary": "Fix log forwarding",
+      "description": "Fix the thing",
+      "acceptance_criteria": "* Logs from the demo service appear in the log tool within one minute",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Needs review",
+      "extra": {
+        "Priority": "Medium",
+        "Reporter": "Sample Person A",
+        "Created": "2026-10-07",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-7",
+      "summary": "Document the release checklist",
+      "description": "As a platform engineer, I want the release checklist written down, so that any teammate can run a release.",
+      "acceptance_criteria": "* The checklist is stored in the team wiki\n* A teammate has run a release using only the checklist",
+      "story_points": null,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "future_sprints",
+      "sprint": "Sprint 13",
+      "epic": "DEMO-100",
+      "labels": [],
+      "assignee": "Sample Person A",
+      "_expect": "Missing info",
+      "extra": {
+        "Priority": "High",
+        "Reporter": "Sample Person B",
+        "Created": "2026-10-08",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-8",
+      "summary": "Set up new build tool",
+      "description": "As a platform engineer, I want a new build tool.",
+      "acceptance_criteria": "* The new build tool runs the main build",
+      "story_points": 8,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "future_sprints",
+      "sprint": "Sprint 13",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform",
+        "tooling"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Suggest split",
+      "extra": {
+        "Priority": "Low",
+        "Reporter": "Sample Person C",
+        "Created": "2026-10-09",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-9",
+      "summary": "Encrypt production database",
+      "description": "As a platform engineer, I want the production database encrypted, so that data at rest is protected.",
+      "acceptance_criteria": "* The database storage is encrypted at rest\n* The application still connects after the change",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "future_sprints",
+      "sprint": "Sprint 13",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Suggest split",
+      "extra": {
+        "Priority": "Medium",
+        "Reporter": "Sample Person A",
+        "Created": "2026-10-10",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-10",
+      "summary": "Migrate log bucket to the new prefix",
+      "description": "As a platform engineer, I want the log bucket moved to the new prefix, so that logs follow the new naming standard.",
+      "acceptance_criteria": "* New logs are written under the new prefix\n* Old logs are still readable",
+      "story_points": 1,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "sprint": "",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Suggest split",
+      "extra": {
+        "Priority": "High",
+        "Reporter": "Sample Person B",
+        "Created": "2026-10-11",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-11",
+      "summary": "Find out if the new scanner reads our registry",
+      "description": "As a platform engineer, I want to find out whether the new scanner can read our image registry, so that we can decide whether to adopt it.",
+      "acceptance_criteria": "* A short write-up says whether the scanner can read the registry\n* The write-up lists what we would need to change",
+      "story_points": 2,
+      "issue_type": "Spike",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Looks good",
+      "extra": {
+        "Priority": "Low",
+        "Reporter": "Sample Person C",
+        "Created": "2026-10-12",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-12",
+      "summary": "Look into cheaper log storage",
+      "description": "",
+      "acceptance_criteria": "",
+      "story_points": 3,
+      "issue_type": "Spike",
+      "status": "To Do",
+      "group": "future_sprints",
+      "sprint": "Sprint 13",
+      "epic": "DEMO-100",
+      "labels": [],
+      "assignee": "Sample Person A",
+      "_expect": "Missing info",
+      "extra": {
+        "Priority": "Medium",
+        "Reporter": "Sample Person A",
+        "Created": "2026-10-13",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-13",
+      "summary": "Update the onboarding page",
+      "description": "As a platform engineer, I want the onboarding page updated, so that new teammates find current steps.",
+      "acceptance_criteria": "* The page lists the current steps",
+      "story_points": 1,
+      "issue_type": "Story",
+      "status": "Done",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "skipped",
+      "extra": {
+        "Priority": "High",
+        "Reporter": "Sample Person B",
+        "Created": "2026-10-14",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-14",
+      "summary": "Demo login page shows wrong error",
+      "description": "The login page shows the wrong error message after three failed tries.",
+      "acceptance_criteria": "* The right error message is shown",
+      "story_points": 2,
+      "issue_type": "Bug",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "skipped",
+      "extra": {
+        "Priority": "Low",
+        "Reporter": "Sample Person C",
+        "Created": "2026-10-15",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-15",
+      "summary": "Rotate service account credentials",
+      "description": "As a platform engineer, I want the logging dashboard to show error rates, so that I can spot problems early.",
+      "acceptance_criteria": "* An error rate panel is visible\n* The panel refreshes every minute",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Needs review",
+      "extra": {
+        "Priority": "Medium",
+        "Reporter": "Sample Person A",
+        "Created": "2026-10-16",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-16",
+      "summary": "Add dashboard for deploy frequency",
+      "description": "As a platform engineer, I want a dashboard of deploy frequency by team, so that we can see how often each team ships.",
+      "acceptance_criteria": "* The dashboard shows deploys per week for each team\n* The dashboard updates daily",
+      "story_points": 3,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "future_sprints",
+      "sprint": "Sprint 13",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform",
+        "tooling"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Looks good",
+      "extra": {
+        "Priority": "High",
+        "Reporter": "Sample Person B",
+        "Created": "2026-10-17",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-17",
+      "summary": "Build self-service environment request portal",
+      "description": "As a platform engineer, I want a self-service portal where teams request a new environment, so that I no longer create each environment by hand.",
+      "acceptance_criteria": "* A team member can request an environment from a form\n* The request creates the environment without manual steps\n* The requester is told when the environment is ready",
+      "story_points": 8,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "sprint": "",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Looks good",
+      "extra": {
+        "Priority": "Low",
+        "Reporter": "Sample Person C",
+        "Created": "2026-10-18",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-18",
+      "summary": "Alert on backup job failures",
+      "description": "h3. Background\n*As a* platform engineer, I want the backup job to report failures, so that I hear about problems the same day.\n\nh3. Notes\n* Uses the existing alert channel",
+      "acceptance_criteria": "# The job sends an alert when a backup fails\n# The alert names the failed system",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "sprint": "",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Looks good",
+      "extra": {
+        "Priority": "Medium",
+        "Reporter": "Sample Person A",
+        "Created": "2026-10-19",
+        "Components": "Tooling"
+      }
+    },
+    {
+      "key": "DEMO-19",
+      "summary": "",
+      "description": "As a platform engineer, I want the demo job to write a run report, so that I can see what each run did.",
+      "acceptance_criteria": "* A report file is written after every run\n* The report lists any errors",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "Sprint 12",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Missing info",
+      "extra": {
+        "Priority": "High",
+        "Reporter": "Sample Person B",
+        "Created": "2026-10-20",
+        "Components": "Platform"
+      }
+    },
+    {
+      "key": "DEMO-20",
+      "summary": "Clean up old build artifacts",
+      "description": "As a platform engineer, I want the nightly cleanup job to remove old build artifacts, so that storage costs stop growing.",
+      "acceptance_criteria": "See description",
+      "story_points": 5,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "future_sprints",
+      "sprint": "Sprint 13",
+      "epic": "DEMO-100",
+      "labels": [
+        "platform",
+        "tooling"
+      ],
+      "assignee": "Sample Person A",
+      "_expect": "Suggest split",
+      "extra": {
+        "Priority": "Low",
+        "Reporter": "Sample Person C",
+        "Created": "2026-10-21",
+        "Components": "Tooling"
+      }
+    }
+  ]
+}

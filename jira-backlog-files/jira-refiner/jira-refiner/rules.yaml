@@ -1,0 +1,203 @@
+# rules.yaml - the rules for the backlog refinement report.
+#
+# HOW TO CHANGE A RULE
+#   1. Change a value to the right of a colon. Do not change the names on the left.
+#   2. Keep the spaces at the start of each line. They matter.
+#   3. Raise rules_version by 1 each time you change something, so every report
+#      shows which rules produced it.
+#   4. Check your change:  python -m refiner validate-rules --rules rules.yaml
+#      A mistake is reported with the line number and what to fix.
+#
+rules_version: 1
+
+# ---------------------------------------------------------------------------
+# Which stories get checked.
+# ---------------------------------------------------------------------------
+scope:
+  include: [current_sprint, future_sprints, backlog]   # any of these three
+  ignore_statuses: [Done, Closed]
+  issue_types: [Story, Spike]    # the real type names are mapped on the Fed side
+
+# ---------------------------------------------------------------------------
+# What each field must look like.
+# ---------------------------------------------------------------------------
+fields:
+  summary:                       # in Jira the "title" is the Summary field
+    required: true
+    min_chars: 10
+
+  description:
+    required: true
+    min_chars: 21                # 20 characters or fewer gets flagged
+    story_format:
+      enabled: true
+      # Looks for: As a <role>, I want <something>, so that <reason>.
+      # Capital letters do not matter.
+      pattern: "as an? .+?,? i (want|need) .+?,? so that .+"
+      allowed_roles: []          # empty means any role is accepted; fill in on the Fed side
+
+  acceptance_criteria:
+    required: true
+    min_chars: 21                # 20 characters or fewer gets flagged
+    # If the text is only these phrases, it is flagged as vague.
+    vague_phrases: ["tbd", "to be determined", "works as expected", "should work", "as expected", "n/a"]
+
+  story_points:
+    required: true
+    review_at_or_above: 5        # 1 point = 1 day, so 5 points is a week of work
+
+  other_required: []            # more fields that must not be empty: epic, labels, assignee, sprint
+
+# ---------------------------------------------------------------------------
+# Does the summary match the description?
+# ---------------------------------------------------------------------------
+summary_match:
+  enabled: true
+  min_overlap: 0.3              # share of the summary's words that must appear in the description or criteria
+  min_summary_words: 3          # shorter summaries are not compared
+
+# ---------------------------------------------------------------------------
+# Is the story the size its points say?
+# ---------------------------------------------------------------------------
+sizing:
+  points_equal_days: 1          # 1 point = 1 day
+  typical_points: 2             # used by the suggestions in a later story
+  max_points_before_keyword_review: 3   # at or below this, work patterns are worth a second look
+  thin_chars: 80                # a description shorter than this counts as "thin"
+
+  # WORK PATTERNS: kinds of work that sound small but usually are not.
+  # When a story at or below the points limit above mentions one of a pattern's words,
+  # the report says "this may need splitting" and shows why_bigger and split_into.
+  #
+  # THIS IS A STARTER LIST OF EXAMPLES, NOT A RULE. The people who know the tech stack
+  # (AWS services, Harness, Nexus, Vault, OpenShift and so on) should extend and correct it.
+  # To add one, copy a block below and change it:
+  #   name:        a short label people will recognise
+  #   words:       phrases to look for (word endings and a few filler words in between are ignored,
+  #                so "encrypt database" also finds "encrypting the production databases")
+  #   why_bigger:  one or two plain sentences on why this takes more than a day or two
+  #   split_into:  how it usually splits into smaller stories (titles only)
+  work_patterns:
+    - name: Encrypt an existing database
+      words: ["encrypt database", "encrypt db", "encrypt rds", "database encryption", "rds encryption"]
+      why_bigger: "An existing unencrypted database usually cannot be encrypted in place. It means a snapshot, an encrypted copy, a restore and a cut-over, or a migration with DMS."
+      split_into:
+        - Inventory the unencrypted databases and choose the approach
+        - Build the encrypted copy in a test environment
+        - Validate the data and the application connections
+        - Cut over and retire the old database
+
+    - name: Upgrade a database or its engine
+      words: ["upgrade database", "upgrade db", "upgrade rds", "upgrade postgres", "upgrade engine", "major version upgrade"]
+      why_bigger: "A major version upgrade needs compatibility testing, a backup, a maintenance window and a way back."
+      split_into:
+        - Test the upgrade on a copy and list what breaks
+        - Fix what the test found
+        - Run the upgrade in a maintenance window
+        - Verify and remove the old version
+
+    - name: Upgrade a cluster
+      words: ["upgrade cluster", "upgrade openshift", "upgrade kubernetes", "upgrade eks"]
+      why_bigger: "A cluster upgrade touches every workload on it. It needs compatibility checks, a staged rollout and a rollback plan."
+      split_into:
+        - Check workload and add-on compatibility
+        - Upgrade a non-production cluster first
+        - Upgrade production in stages
+        - Verify and clean up
+
+    - name: Migrate data or a workload
+      words: ["migrate", "replatform"]
+      why_bigger: "Moving data or a service usually needs a plan, a test run, a cut-over and a way back."
+      split_into:
+        - Plan and list what moves
+        - Do a test migration
+        - Cut over
+        - Verify and clean up the old copy
+
+# ---------------------------------------------------------------------------
+# Suggested fixes. These are drafts for a person to review, never written to Jira.
+# ---------------------------------------------------------------------------
+suggestions:
+  default_role: platform engineer     # used in "As a ..." when the story has no role (must be an allowed role, if you set any)
+  max_acceptance_criteria: 5          # a suggestion never lists more than this many criteria
+  max_questions: 6                    # most "Ask in refinement" questions per story
+  max_related_stories: 2              # well-written stories from the same epic to point at as examples
+  max_context_references: 2           # context-file sections to point at
+  min_shared_words: 2                 # how many meaningful words must match before something counts as related
+  # Everyday words that say little about what a story is ABOUT. They are ignored when looking for related
+  # stories and related context, so "create" or "build" do not make unrelated stories look alike.
+  # (Words like "encrypt" or "migrate" are NOT here, because they are what those stories are about.)
+  ignore_when_matching: [add, allow, build, change, create, enable, fix, improve, make, move, remove,
+                         run, send, set, show, start, stop, update, use, write]
+  # A summary that starts with one of these reads as an action, so it becomes "I want to <summary>".
+  action_verbs: [add, allow, build, change, check, clean, configure, connect, create, define, delete,
+                 deploy, document, enable, encrypt, find, fix, generate, implement, improve, install,
+                 investigate, look, make, migrate, monitor, move, patch, remove, rename, replace,
+                 review, rotate, run, scan, send, set, show, start, stop, test, turn, update, upgrade,
+                 upload, use, validate, write]
+
+# ---------------------------------------------------------------------------
+# The Excel workbook.
+# ---------------------------------------------------------------------------
+workbook:
+  title: Backlog refinement report
+  banner: "INTERNAL USE ONLY - Via Logic LLC. Not for distribution outside the organization."
+  # Fill in on the Fed side (for example https://jira.example.com) to make story keys clickable.
+  # Leave as "" for no links.
+  jira_base_url: ""
+  # Column order on the "Raw Jira data" tab. To move a column, move its name. Any column you leave out
+  # is added at the end (other Jira fields in alphabetical order), so nothing is ever dropped.
+  raw_column_order: [Key, Type, Status, Group, Sprint, Epic, Labels, Assignee, Story points, Summary,
+                     Description, Acceptance criteria, Checked, Verdict]
+
+# ---------------------------------------------------------------------------
+# The Confluence report. It is written as separate HTML body sections, one per marker pair, so the
+# existing publisher can replace each section between its start and end markers.
+# ---------------------------------------------------------------------------
+confluence:
+  # How a section's markers are written. {id} is replaced by the section id below. Match whatever the existing
+  # publisher expects (an HTML comment is only a starting guess).
+  marker_start: "<!-- {id} START -->"
+  marker_end: "<!-- {id} END -->"
+  # false = the section files hold the body only (the existing publisher adds the markers itself).
+  # true  = the markers are written around the body in each file.
+  include_markers: false
+  section_ids:                      # lower case letters, digits and hyphens only
+    summary: refiner-summary
+    labels: refiner-labels
+    not_checked: refiner-not-checked
+  # A sentence at the bottom of the summary section saying where the workbook is.
+  workbook_note: "The workbook with every story, finding and suggestion is attached to the pipeline run that published this page."
+
+# ---------------------------------------------------------------------------
+# Skip some checks for one issue type. Example, to skip the "As a..." check for spikes:
+#   type_skips:
+#     Spike: [description_format]
+# ---------------------------------------------------------------------------
+type_skips: {}
+
+# ---------------------------------------------------------------------------
+# How serious each finding is: high, medium or low.
+# ---------------------------------------------------------------------------
+severity:
+  summary_missing: high
+  summary_short: medium
+  summary_mismatch: low
+  description_missing: high
+  description_short: medium
+  description_format: low
+  ac_missing: high
+  ac_short: medium
+  ac_vague: medium
+  points_missing: medium
+  other_required_missing: low
+  large_and_thin: high
+  possibly_undersized: medium
+
+# ---------------------------------------------------------------------------
+# Cell colors in the workbook for each severity (6-digit codes, keep the quotes).
+# ---------------------------------------------------------------------------
+highlight:
+  high: "FFD966"
+  medium: "FFF2CC"
+  low: "FFFFE5"
