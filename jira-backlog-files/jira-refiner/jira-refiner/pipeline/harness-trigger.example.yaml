@@ -1,0 +1,19 @@
+# SKETCH of the weekly trigger. The report should run EVERY WEEK, the working day before team refinement,
+# so people walk into refinement knowing what needs work. Align with your Harness version before using it.
+#
+# Cron fields: minute hour day-of-month month day-of-week. Check which time zone your Harness uses for cron
+# (often UTC) and set the hour so the report is ready the morning before refinement.
+# Example: refinement on Wednesdays -> run Tuesday at 12:00 UTC: "0 12 * * 2"
+trigger:
+  name: Weekly before refinement
+  identifier: weekly_before_refinement
+  enabled: true
+  orgIdentifier: REPLACE_ORG
+  projectIdentifier: REPLACE_PROJECT
+  pipelineIdentifier: jira_backlog_refinement
+  source:
+    type: Scheduled
+    spec:
+      type: Cron
+      spec:
+        expression: "0 12 * * REPLACE_DAY_BEFORE_REFINEMENT"    # day of week: 1 = Monday ... 5 = Friday

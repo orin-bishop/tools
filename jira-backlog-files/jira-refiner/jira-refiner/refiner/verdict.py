@@ -12,6 +12,7 @@ SPLIT_CODES = frozenset({"large_and_thin", "possibly_undersized"})
 # Findings that mean something is simply not filled in.
 MISSING_CODES = frozenset({
     "summary_missing", "description_missing", "ac_missing", "points_missing", "other_required_missing",
+    "epic_missing", "labels_missing",
 })
 
 _ORDER = {"high": 3, "medium": 2, "low": 1}

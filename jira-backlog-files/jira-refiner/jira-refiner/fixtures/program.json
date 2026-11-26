@@ -1,0 +1,256 @@
+{
+  "note": "Made-up data for tests and demos. Nothing here comes from a real Jira or a real program.",
+  "epics": [
+    {
+      "key": "EPIC-1",
+      "name": "Terraform migration",
+      "status": "In Progress",
+      "start_date": "2026-09-01",
+      "end_date": "2027-03-31"
+    },
+    {
+      "key": "EPIC-2",
+      "name": "Logging and alerting",
+      "status": "In Progress",
+      "start_date": "2026-10-01",
+      "end_date": "2027-06-30"
+    },
+    {
+      "key": "EPIC-3",
+      "name": "Database encryption",
+      "status": "To Do",
+      "start_date": "2027-01-15",
+      "end_date": "2027-04-30"
+    },
+    {
+      "key": "EPIC-4",
+      "name": "Legacy cleanup",
+      "status": "Done",
+      "start_date": "2026-01-10",
+      "end_date": "2026-06-30"
+    },
+    {
+      "key": "EPIC-5",
+      "name": "Onboarding docs",
+      "status": "In Progress",
+      "start_date": "2026-08-01",
+      "end_date": "2026-10-31"
+    }
+  ],
+  "stories": [
+    {
+      "key": "P-1",
+      "summary": "Terraform module for VPC",
+      "description": "As a platform engineer, I want a Terraform module for the VPC, so that networks are built the same way.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "EPIC-1",
+      "labels": [
+        "team-save"
+      ],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-2",
+      "summary": "Terraform module for security groups",
+      "description": "As a platform engineer, I want a Terraform module for security groups, so that rules are reused.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "EPIC-1",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-3",
+      "summary": "Add Terraform state backend",
+      "description": "As a platform engineer, I want a shared state backend for Terraform, so that teams do not overwrite each other.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-4",
+      "summary": "Terraform pipeline for plan and apply",
+      "description": "As a platform engineer, I want a pipeline that plans and applies Terraform, so that changes are reviewed first.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "EPIC-1",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-5",
+      "summary": "Add alert for failed log shipping",
+      "description": "As a platform engineer, I want an alert when log shipping fails, so that someone hears about it quickly.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-6",
+      "summary": "Alert on failed log shipping",
+      "description": "As a platform engineer, I want an alert when log shipping fails, so that someone hears about it quickly.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "EPIC-2",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-7",
+      "summary": "Encrypt production database",
+      "description": "As a platform engineer, I want the production database encrypted, so that data at rest is protected.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 8,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "EPIC-3",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-8",
+      "summary": "Dashboard for deploy frequency",
+      "description": "As a platform engineer, I want a dashboard of deploy frequency, so that we can see how often we ship.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "EPIC-4",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-9",
+      "summary": "Update onboarding page",
+      "description": "As a platform engineer, I want the onboarding page updated, so that new teammates find current steps.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "EPIC-5",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-10",
+      "summary": "Rotate service credentials",
+      "description": "As a platform engineer, I want service credentials rotated, so that old credentials stop working.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-11",
+      "summary": "Rotate cloud credentials",
+      "description": "As a platform engineer, I want cloud credentials rotated, so that old credentials stop working.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-12",
+      "summary": "Rotate API credentials",
+      "description": "As a platform engineer, I want API credentials rotated, so that old credentials stop working.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "P-13",
+      "summary": "Terraform module for VPC endpoints",
+      "description": "",
+      "acceptance_criteria": "",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "Backlog",
+      "group": "backlog",
+      "epic": "EPIC-1",
+      "labels": [],
+      "assignee": "Sample Person A"
+    }
+  ],
+  "intake": [
+    {
+      "key": "NEW-1",
+      "summary": "Terraform module for VPC",
+      "description": "As a platform engineer, I want a Terraform module for the VPC, so that networks are built the same way.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "intake",
+      "epic": "EPIC-1",
+      "labels": [],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "NEW-2",
+      "summary": "Misc fixes and cleanup",
+      "description": "As a platform engineer, I want to rotate the shared database credentials every 90 days, so that old credentials stop working.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "intake",
+      "epic": "EPIC-2",
+      "labels": [
+        "team-save"
+      ],
+      "assignee": "Sample Person A"
+    },
+    {
+      "key": "NEW-3",
+      "summary": "Add alert for failed log shipping",
+      "description": "As a platform engineer, I want an alert when log shipping fails, so that someone hears about it quickly.",
+      "acceptance_criteria": "* The change is made and checked by a second person\n* The change is written up for the team",
+      "story_points": 2,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "intake",
+      "epic": "",
+      "labels": [],
+      "assignee": "Sample Person A"
+    }
+  ]
+}

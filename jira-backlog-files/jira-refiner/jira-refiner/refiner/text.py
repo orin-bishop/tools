@@ -46,7 +46,11 @@ def stem(word):
     word = word.lower()
     for ending in ("ing", "ion", "ed", "es", "s", "e"):
         if word.endswith(ending) and len(word) - len(ending) >= 3:
-            return word[: -len(ending)]
+            root = word[: -len(ending)]
+            # "logging" -> "logg" -> "log", "shipped" -> "shipp" -> "ship". Not for "install", "pass" or "buzz".
+            if ending in ("ing", "ed") and len(root) >= 4 and root[-1] == root[-2] and root[-1] not in "lsz":
+                root = root[:-1]
+            return root
     return word
 
 
@@ -82,3 +86,32 @@ def contains_phrase(phrase, token_list, max_gap=3):
         else:
             return True
     return False
+
+
+def jaccard(first, second):
+    """How alike two sets of words are: shared words divided by all words. 0 to 1. Two empty sets give 0."""
+    first, second = set(first), set(second)
+    union = first | second
+    return len(first & second) / len(union) if union else 0.0
+
+
+def topic_words(text, ignore=()):
+    """The words that say what a text is ABOUT: no filler words, and none of the `ignore` words
+    (everyday words like 'create' that every story has). `ignore` is a collection of plain words."""
+    ignored = {stem(w) for w in ignore}
+    return {w for w in words(text) if w not in ignored}
+
+
+def surface_map(texts):
+    """{stemmed word: the most common real spelling}, so a result like 'databas' can be shown as 'database'."""
+    from collections import Counter
+    counts = {}
+    for text in texts:
+        for word in re.findall(r"[a-z0-9]+", str(text).lower()):
+            counts.setdefault(stem(word), Counter())[word] += 1
+    return {key: found.most_common(1)[0][0] for key, found in counts.items()}
+
+
+def natural_key(text):
+    """A sort key that puts DEMO-2 before DEMO-10: ('DEMO-', 2) sorts before ('DEMO-', 10)."""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", str(text))]

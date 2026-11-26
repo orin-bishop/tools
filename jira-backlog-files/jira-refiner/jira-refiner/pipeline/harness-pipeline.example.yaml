@@ -1,0 +1,87 @@
+# SKETCH of the Harness pipeline. Built without seeing the Fed side's pipelines, so ALIGN IT WITH YOUR EXISTING
+# EXAMPLES (the Jira query pipeline, the Confluence publisher, the workbook pipeline) before using it.
+# Every REPLACE_ value must be filled in; `python -m refiner doctor` lists the ones left.
+#
+# What it does, in order:
+#   1. self-check          python -m refiner doctor        (stops the run if placeholders remain)
+#   2. export Jira         your existing Jira query steps save JSON: current sprint, upcoming sprints, backlog, epics
+#   3. snapshot            python -m refiner snapshot      (turns the exports into snapshot.json)
+#   4. report              python -m refiner report        (workbook, changes.csv, update-pack.html, confluence/)
+#   5. publish             your existing Confluence publisher posts each section in confluence/manifest.json
+#   6. keep the files      the report folder is saved where leads can open it
+pipeline:
+  name: Jira Backlog Refinement
+  identifier: jira_backlog_refinement
+  orgIdentifier: REPLACE_ORG
+  projectIdentifier: REPLACE_PROJECT
+  properties:
+    ci:
+      codebase:
+        connectorRef: REPLACE_GIT_CONNECTOR           # the connector that can clone THIS repository
+        repoName: REPLACE_THIS_REPO_NAME
+        build: <+input>
+  stages:
+    - stage:
+        name: Refinement report
+        identifier: refinement_report
+        type: CI
+        spec:
+          cloneCodebase: true
+          infrastructure: REPLACE_INFRASTRUCTURE_BLOCK   # copy the infrastructure block from an existing pipeline
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Self-check
+                  identifier: self_check
+                  spec:
+                    connectorRef: REPLACE_IMAGE_CONNECTOR
+                    image: REPLACE_PYTHON_IMAGE          # a Python 3.9+ image your pipelines already use
+                    shell: Bash
+                    command: |
+                      pip install -r requirements.txt
+                      python -m refiner doctor
+              # ---- 2. export Jira: copy the step(s) from the existing Jira query pipeline ----
+              # Save four files into exports/: current_sprint.json, future_sprints.json, backlog.json, epics.json
+              # (Agile API: /rest/agile/1.0/sprint/<id>/issue and /rest/agile/1.0/board/<id>/backlog; epics by search.
+              #  Add expand=names to get readable field names.)
+              - step:
+                  type: Run
+                  name: Export Jira
+                  identifier: export_jira
+                  spec:
+                    connectorRef: REPLACE_IMAGE_CONNECTOR
+                    image: REPLACE_PYTHON_IMAGE
+                    shell: Bash
+                    command: |
+                      echo "REPLACE_JIRA_EXPORT_STEP: use the existing Jira query pipeline's commands here"
+              - step:
+                  type: Run
+                  name: Report
+                  identifier: report
+                  spec:
+                    connectorRef: REPLACE_IMAGE_CONNECTOR
+                    image: REPLACE_PYTHON_IMAGE
+                    shell: Bash
+                    command: |
+                      pip install -r requirements.txt
+                      git clone REPLACE_CONTEXT_REPO_URL context-repo    # the program metrics repo, through its connector
+                      python -m refiner snapshot --fields jira_fields.yaml \
+                        --current exports/current_sprint.json --future exports/future_sprints.json \
+                        --backlog exports/backlog.json --epics exports/epics.json --out snapshot.json
+                      python -m refiner doctor --snapshot snapshot.json
+                      python -m refiner report --snapshot snapshot.json --rules rules.yaml \
+                        --context REPLACE_CONTEXT_FOLDER --out-dir refinement-out
+              # ---- 5. publish: copy the existing Confluence publisher step. For each section in
+              #      refinement-out/confluence/manifest.json, publish its file between its start and end markers. ----
+              - step:
+                  type: Run
+                  name: Publish to Confluence
+                  identifier: publish_confluence
+                  spec:
+                    connectorRef: REPLACE_IMAGE_CONNECTOR
+                    image: REPLACE_PYTHON_IMAGE
+                    shell: Bash
+                    command: |
+                      echo "REPLACE_CONFLUENCE_PUBLISH_STEP: loop over refinement-out/confluence/manifest.json"
+              # ---- 6. keep the files: save refinement-out/ the way the workbook example pipeline does ----

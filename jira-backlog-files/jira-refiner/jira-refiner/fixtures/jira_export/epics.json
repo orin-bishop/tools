@@ -1,0 +1,25 @@
+{
+  "issues": [
+    {
+      "key": "JE-1",
+      "fields": {
+        "summary": "Terraform migration",
+        "status": {
+          "name": "In Progress"
+        },
+        "duedate": "2027-03-31",
+        "customfield_10200": "2027-04-30T00:00:00.000+0000"
+      }
+    },
+    {
+      "key": "JE-2",
+      "fields": {
+        "summary": "Legacy cleanup",
+        "status": {
+          "name": "Done"
+        },
+        "duedate": null
+      }
+    }
+  ]
+}

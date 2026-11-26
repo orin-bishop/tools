@@ -7,9 +7,11 @@ import re
 from dataclasses import dataclass
 
 from .rules import Rules
+from .labels import label_findings
 from .sizing import check_sizing
 from .storyform import role_in
 from .text import plain_text, words
+from .titles import title_is_long
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,15 @@ def run_checks(story, rules: Rules):
 
     _check_summary_match(summary, description, criteria, rules, add)
 
+    if title_is_long(summary, rules):
+        add("title_long", "summary", f"The title is {len(summary)} characters. {rules.title_max_chars} or fewer reads better.")
+
+    if rules.epics_enabled and story.group in rules.epics_required_groups and not story.epic.strip():
+        add("epic_missing", "epic", "The story has no epic. Every story needs one.")
+
+    for code, message in label_findings(story, rules):
+        add(code, "labels", message)
+
     for code, message in check_sizing(story, rules, summary, description, criteria):
         add(code, "story_points", message)
 
@@ -69,6 +80,8 @@ def _check_description(description, rules, add):
 
     if len(description) < rules.description_min_chars:
         add("description_short", "description", f"The description is short ({len(description)} characters; at least {rules.description_min_chars} expected).")
+    elif rules.description_brief_chars and len(description) < rules.description_brief_chars:
+        add("description_brief", "description", f"The description is brief ({len(description)} characters; {rules.description_brief_chars} or more usually says enough).")
 
     if rules.story_format_enabled:
         match = re.search(rules.story_format_pattern, description, re.IGNORECASE | re.DOTALL)
@@ -92,6 +105,8 @@ def _check_criteria(criteria, rules, add):
 
     if _left_after_vague_phrases(criteria, rules) < rules.ac_min_chars:
         add("ac_vague", "acceptance_criteria", "The acceptance criteria are vague. They say little more than 'works as expected'.")
+    if rules.ac_brief_chars and len(criteria) < rules.ac_brief_chars:
+        add("ac_brief", "acceptance_criteria", f"The acceptance criteria are brief ({len(criteria)} characters; {rules.ac_brief_chars} or more usually says enough).")
 
 
 def _left_after_vague_phrases(criteria, rules):

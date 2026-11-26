@@ -1,0 +1,84 @@
+{
+  "names": {
+    "summary": "Summary",
+    "customfield_10100": "Acceptance Criteria",
+    "customfield_10101": "Story Points",
+    "customfield_10102": "Epic Link",
+    "customfield_10103": "Sprint",
+    "priority": "Priority",
+    "components": "Components",
+    "customfield_10200": "Target end"
+  },
+  "issues": [
+    {
+      "key": "J-1",
+      "fields": {
+        "summary": "Add health check to demo service",
+        "description": "As a platform engineer, I want a health check endpoint on the demo service, so that the pipeline can confirm it is up.",
+        "customfield_10100": "* Returns 200 when the service is up\n* Returns 503 when the database is down",
+        "customfield_10101": 2.0,
+        "customfield_10102": "JE-1",
+        "customfield_10103": [
+          "com.atlassian.greenhopper.service.sprint.Sprint@1a2b[id=12,rapidViewId=3,state=ACTIVE,name=Sprint 12,startDate=2026-11-16]"
+        ],
+        "labels": [
+          "platform"
+        ],
+        "issuetype": {
+          "name": "Story"
+        },
+        "status": {
+          "name": "In Progress"
+        },
+        "assignee": {
+          "displayName": "Sample Person A",
+          "name": "sample.a"
+        },
+        "priority": {
+          "name": "Medium"
+        },
+        "components": [
+          {
+            "name": "Platform"
+          }
+        ]
+      }
+    },
+    {
+      "key": "J-2",
+      "fields": {
+        "summary": "Rotate demo API keys",
+        "description": "h3. Why\n*As a* platform engineer, I want the demo API keys rotated, so that old keys stop working.",
+        "customfield_10100": null,
+        "customfield_10101": null,
+        "customfield_10102": null,
+        "customfield_10103": [
+          {
+            "id": 12,
+            "name": "Sprint 12",
+            "state": "active"
+          }
+        ],
+        "labels": [],
+        "issuetype": {
+          "name": "Story"
+        },
+        "status": {
+          "name": "To Do"
+        },
+        "assignee": {
+          "displayName": "Sample Person A",
+          "name": "sample.a"
+        },
+        "priority": {
+          "name": "Medium"
+        },
+        "components": [
+          {
+            "name": "Platform"
+          }
+        ]
+      }
+    }
+  ]
+}

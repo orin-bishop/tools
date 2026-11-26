@@ -7,11 +7,12 @@ from openpyxl import load_workbook
 
 from refiner.cli import main
 from refiner.context import load_context
-from refiner.measures import GROUP_TITLES, MEASURES, count_by_group, count_by_label, count_row, label_key
-from refiner.model import Story, load_snapshot
+from refiner.measures import GROUP_TITLES, MEASURES, count_by_group, count_by_label, count_row, label_key, shown_groups
+from refiner.model import Story, load_data, load_snapshot
 from refiner.runner import check_all
 from refiner.suggest import suggest_all
-from refiner.workbook import FINDINGS, RAW, RULES, SUGGESTIONS, SUMMARY, TOC, build_workbook
+from refiner.workbook import (CHANGES, DUPLICATES, EPICS, FINDINGS, RAW, RULES, SUGGESTIONS, SUMMARY, THEMES, TOC,
+                              build_workbook)
 from tests.helpers import ROOT, RULES_PATH, SNAPSHOT_PATH, make_story, rules_with
 
 GENERATED = "2026-11-25 10:00"
@@ -45,7 +46,7 @@ class StructureTests(unittest.TestCase):
         self.wb, self.summary = build(context=load_context(ROOT / "context"))
 
     def test_tabs_and_their_order(self):
-        self.assertEqual(self.wb.sheetnames, [TOC, SUMMARY, FINDINGS, SUGGESTIONS, RAW, RULES])
+        self.assertEqual(self.wb.sheetnames, [TOC, SUMMARY, FINDINGS, SUGGESTIONS, CHANGES, EPICS, DUPLICATES, THEMES, RAW, RULES])
 
     def test_every_tab_carries_the_banner(self):
         for ws in self.wb.worksheets:
@@ -59,7 +60,7 @@ class StructureTests(unittest.TestCase):
                         self.assertEqual(cell.font.name, "Arial", f"{ws.title}!{cell.coordinate}")
 
     def test_data_tabs_have_filters_and_frozen_headers(self):
-        for name in (FINDINGS, SUGGESTIONS, RAW, RULES):
+        for name in (FINDINGS, SUGGESTIONS, CHANGES, EPICS, DUPLICATES, THEMES, RAW, RULES):
             ws = self.wb[name]
             self.assertTrue(ws.auto_filter.ref.startswith("A2:"), name)
             self.assertTrue(ws.freeze_panes.endswith("3"), name)
@@ -77,7 +78,7 @@ class StructureTests(unittest.TestCase):
         self.assertEqual(ws.cell(row=find_row(ws, "Rules version"), column=2).value, 1)
         self.assertIn("hints.yaml", ws.cell(row=find_row(ws, "Context used"), column=2).value)
         self.assertIn("statuses ignored: Done, Closed", ws.cell(row=find_row(ws, "In scope"), column=2).value)
-        for name in (SUMMARY, FINDINGS, SUGGESTIONS, RAW, RULES):
+        for name in (SUMMARY, FINDINGS, SUGGESTIONS, CHANGES, EPICS, DUPLICATES, THEMES, RAW, RULES):
             cell = ws.cell(row=find_row(ws, name), column=1)
             self.assertEqual(cell.hyperlink.location, f"'{name}'!A1")
 
@@ -142,13 +143,16 @@ class FindingsTests(unittest.TestCase):
         for title, _ in MEASURES:
             col = self.cols[title]
             values = {self.ws.cell(row=r, column=col).value for r in range(3, self.ws.max_row + 1)}
-            self.assertEqual(values, {"Yes", "No"}, title)
+            self.assertLessEqual(values, {"Yes", "No"}, title)
+            self.assertIn("No", values, title)
+            if title in ("Not pointed", "Description needs update", "Acceptance criteria needs update"):
+                self.assertEqual(values, {"Yes", "No"}, title)
         self.assertEqual(self.cell("DEMO-7", "Not pointed").value, "Yes")
         self.assertEqual(self.cell("DEMO-2", "Description needs update").value, "Yes")
         self.assertEqual(self.cell("DEMO-3", "Acceptance criteria needs update").value, "Yes")
 
     def test_details_and_codes(self):
-        self.assertEqual(self.cell("DEMO-8", "Findings").value, "description_format; large_and_thin")
+        self.assertEqual(self.cell("DEMO-8", "Findings").value, "description_brief; description_format; ac_brief; large_and_thin")
         self.assertIn("[high] The story is 8 points", self.cell("DEMO-8", "Details").value)
 
     def test_multi_line_criteria_keep_their_line_breaks(self):
@@ -185,10 +189,11 @@ class SummaryTests(unittest.TestCase):
         self.assertIn(f"'Findings'!${not_pointed}:${not_pointed},\"Yes\"", self.ws.cell(row=row, column=3).value)
 
     def test_verdict_columns_use_their_own_header_text(self):
+        from openpyxl.utils import get_column_letter
         row = find_row(self.ws, "Backlog")
-        formula = self.ws.cell(row=row, column=6).value
-        self.assertTrue(formula.endswith(",F$5)"), formula)
-        self.assertEqual(self.ws.cell(row=5, column=6).value, "Suggest split")
+        column = headers(self.ws, 5)["Suggest split"]
+        formula = self.ws.cell(row=row, column=column).value
+        self.assertTrue(formula.endswith(f",{get_column_letter(column)}$5)"), formula)
 
     def test_group_rows_follow_the_rules_scope(self):
         rules = rules_with(lambda d: d["scope"].update(include=["current_sprint", "backlog"]))
@@ -223,7 +228,9 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(sum(row[v] for v in ("Suggest split", "Missing info", "Needs review", "Looks good")), row["Stories"])
         groups = count_by_group(self.summary.results, rules_with().include_groups)
         self.assertEqual(sum(g["Stories"] for g in groups.values()), row["Stories"])
-        self.assertEqual(list(groups), [GROUP_TITLES[g] for g in rules_with().include_groups])
+        shown = shown_groups(self.summary.results, rules_with().include_groups)
+        self.assertEqual(list(groups), [GROUP_TITLES[g] for g in shown])
+        self.assertNotIn("intake", shown)                 # no stories waiting to be uploaded, so no row for them
 
     def test_label_counting_helpers(self):
         stories = [Story.from_dict(dict(key="A", labels=["x", "y"])), Story.from_dict(dict(key="B"))]
@@ -364,7 +371,7 @@ class SafetyTests(unittest.TestCase):
 
     def test_empty_snapshot_still_builds(self):
         wb, _ = build([])
-        self.assertEqual(wb.sheetnames, [TOC, SUMMARY, FINDINGS, SUGGESTIONS, RAW, RULES])
+        self.assertEqual(wb.sheetnames, [TOC, SUMMARY, FINDINGS, SUGGESTIONS, CHANGES, EPICS, DUPLICATES, THEMES, RAW, RULES])
 
     def test_rules_in_effect_lists_the_settings(self):
         wb, _ = build()
@@ -379,6 +386,145 @@ class SafetyTests(unittest.TestCase):
         def snapshot(wb):
             return [[[c.value for c in row] for row in ws.iter_rows()] for ws in wb.worksheets]
         self.assertEqual(snapshot(build()[0]), snapshot(build()[0]))
+
+
+def build_program(edit=None):
+    """The made-up program fixture: epics, duplicates, themes and stories waiting to be uploaded."""
+    from datetime import date
+    rules = rules_with(edit)
+    data = load_data(ROOT / "fixtures" / "program.json")
+    summary = check_all(data.stories, rules, data.epics, today=date(2026, 11, 25))
+    suggestions = suggest_all(summary.results, rules, load_context(ROOT / "context"), summary.analysis)
+    return build_workbook(summary, data.stories, suggestions, rules, None, generated=GENERATED), summary, suggestions, rules
+
+
+class ProgramWorkbookTests(unittest.TestCase):
+    def setUp(self):
+        self.wb, self.summary, self.suggestions, self.rules = build_program()
+
+    def test_the_summary_has_a_by_epic_table_made_of_formulas_with_no_epic_last(self):
+        ws = self.wb[SUMMARY]
+        start = find_row(ws, "Epic")
+        keys = []
+        row = start + 1
+        while ws.cell(row=row, column=1).value:
+            keys.append(ws.cell(row=row, column=1).value)
+            row += 1
+        self.assertEqual(keys, ["EPIC-1", "EPIC-2", "EPIC-3", "EPIC-4", "EPIC-5", "No epic"])
+        self.assertTrue(ws.cell(row=start + 1, column=2).value.startswith("=COUNTIFS('Findings'!$"))
+        self.assertIn("$A", ws.cell(row=start + 1, column=2).value)
+        # the epic name sits after the counts
+        name_col = 2 + len(MEASURES) + 5
+        self.assertEqual(ws.cell(row=start, column=name_col).value, "Epic name")
+        self.assertEqual(ws.cell(row=start + 1, column=name_col).value, "Terraform migration")
+
+    def test_the_findings_tab_has_an_epic_helper_column(self):
+        ws = self.wb[FINDINGS]
+        cols = headers(ws)
+        values = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=cols["Epic key (used by Summary)"]).value for r in range(3, ws.max_row + 1)}
+        self.assertEqual(values["P-3"], "No epic")
+        self.assertEqual(values["P-1"], "EPIC-1")
+
+    def test_the_changes_tab(self):
+        ws = self.wb[CHANGES]
+        cols = headers(ws)
+        self.assertEqual(list(cols), ["Key", "Group", "Field", "Kind", "Current", "Suggested", "Reason", "Done?"])
+        rows = [{h: ws.cell(row=r, column=c).value for h, c in cols.items()} for r in range(3, ws.max_row + 1)]
+        epic = next(r for r in rows if r["Key"] == "P-3" and r["Field"] == "Epic")
+        self.assertEqual((epic["Group"], epic["Kind"], epic["Suggested"], epic["Done?"]), ("Backlog", "update", "EPIC-1", None))
+        theme = next(r for r in rows if r["Key"] == "P-3" and r["Field"] == "Summary")
+        self.assertEqual(theme["Suggested"], "Terraform: Add state backend")
+        self.assertEqual(fill(ws.cell(row=3, column=cols["Done?"])), "DDEBF7")
+        validation = ws.data_validations.dataValidation[0]
+        self.assertEqual(validation.formula1, '"Y,N"')
+
+    def test_the_changes_tab_matches_the_change_list(self):
+        from refiner.changes import build_changes
+        expected = build_changes(self.summary, self.suggestions, self.rules)
+        self.assertEqual(self.wb[CHANGES].max_row, 2 + len(expected))
+
+    def test_the_epics_tab(self):
+        ws = self.wb[EPICS]
+        keys = [ws.cell(row=r, column=1).value for r in range(3, 10)]
+        self.assertEqual(keys[:6], ["EPIC-1", "EPIC-2", "EPIC-3", "EPIC-4", "EPIC-5", "No epic"])      # current and future first
+        flags = [ws.cell(row=r, column=6).value for r in range(3, 8)]
+        self.assertEqual(flags, ["Yes", "Yes", "Yes", "No", "No"])
+        self.assertTrue(ws.cell(row=3, column=7).value.startswith("=COUNTIFS('Findings'!$"))
+        self.assertEqual(ws.cell(row=3, column=4).value, "2026-09-01")
+
+    def test_the_epics_tab_lists_stories_that_need_an_epic_beside_the_epic_list(self):
+        ws = self.wb[EPICS]
+        left = 9                                                     # its own columns, to the right of the epic list
+        self.assertEqual(ws.cell(row=1, column=left).value, "Stories that need an epic")
+        self.assertEqual([ws.cell(row=2, column=left + i).value for i in range(4)], ["Story", "Summary", "Epic now", "Suggestion"])
+        rows, row = {}, 3
+        while ws.cell(row=row, column=left).value:
+            rows[ws.cell(row=row, column=left).value] = [ws.cell(row=row, column=left + c).value for c in range(1, 4)]
+            row += 1
+        self.assertEqual(set(rows), {"NEW-3", "P-3", "P-5", "P-8", "P-9", "P-10", "P-11", "P-12"})
+        self.assertIn("EPIC-1 Terraform migration (50%)", rows["P-3"][2])
+        self.assertIn('Create an epic "Credentials"', rows["P-10"][2])
+        self.assertEqual(rows["P-8"][1], "EPIC-4")
+        self.assertIn("No existing epic fits well", rows["P-8"][2])
+        self.assertGreaterEqual(ws.column_dimensions["L"].width, 40)          # the suggestion column is wide enough to read
+
+    def test_new_epic_ideas_are_listed(self):
+        ws = self.wb[EPICS]
+        row = find_row(ws, "Ideas for new epics (stories that share a word and fit no current epic)", column=9) + 2
+        self.assertEqual([ws.cell(row=row, column=9).value, ws.cell(row=row, column=10).value], ["Credentials", "P-10, P-11, P-12"])
+
+    def test_the_duplicates_tab(self):
+        ws = self.wb[DUPLICATES]
+        cols = headers(ws)
+        rows = [{h: ws.cell(row=r, column=c).value for h, c in cols.items()} for r in range(3, ws.max_row + 1)]
+        first = rows[0]
+        self.assertEqual((first["Kind"], first["Alike"]), ("Possible duplicate", 1.0))
+        self.assertEqual(ws.cell(row=3, column=cols["Alike"]).number_format, "0%")
+        waiting = next(r for r in rows if {r["Story A"], r["Story B"]} == {"NEW-1", "P-1"})
+        self.assertIn("NEW-1 is not in Jira yet", waiting["Note"])
+        related = next(r for r in rows if r["Kind"] == "Related")
+        self.assertIn("Consider grouping", related["Note"])
+        both_in_jira = next(r for r in rows if {r["Story A"], r["Story B"]} == {"P-5", "P-6"})
+        self.assertEqual(both_in_jira["Note"], "Close or merge one of them.")
+
+    def test_the_themes_tab(self):
+        ws = self.wb[THEMES]
+        cols = headers(ws)
+        row = next(r for r in range(3, ws.max_row + 1) if ws.cell(row=r, column=1).value == "Terraform")
+        value = lambda name: ws.cell(row=row, column=cols[name]).value                    # noqa: E731
+        self.assertEqual((value("Where from"), value("Titles"), value("Start with it"), value("Consistent?")),
+                         ("Listed in the rules file", 6, 5, "No"))
+        self.assertEqual(value("Mention it but do not start with it"), "P-3: Add Terraform state backend")
+        self.assertEqual(value("Suggested titles (listed themes only)"), "P-3: Terraform: Add state backend")
+
+    def test_counted_themes_are_listed_without_suggested_titles(self):
+        ws = self.wb[THEMES]
+        cols = headers(ws)
+        for row in range(3, ws.max_row + 1):
+            if ws.cell(row=row, column=cols["Where from"]).value == "Found by counting":
+                self.assertIn(ws.cell(row=row, column=cols["Suggested titles (listed themes only)"]).value, (None, ""))
+
+    def test_waiting_stories_never_get_jira_links(self):
+        wb, _, _, _ = build_program(lambda d: d["workbook"].update(jira_base_url="https://jira.example.com"))
+        for name in (FINDINGS, RAW, CHANGES):
+            ws = wb[name]
+            for row in range(3, ws.max_row + 1):
+                cell = ws.cell(row=row, column=1)
+                if str(cell.value).startswith("NEW-"):
+                    self.assertIsNone(cell.hyperlink, f"{name} {cell.value}")
+                elif str(cell.value).startswith("P-"):
+                    self.assertEqual(cell.hyperlink.target, f"https://jira.example.com/browse/{cell.value}", name)
+
+    def test_the_contents_tab_lists_every_tab(self):
+        ws = self.wb[TOC]
+        for name in (CHANGES, EPICS, DUPLICATES, THEMES):
+            self.assertTrue(ws.cell(row=find_row(ws, name), column=2).value)
+
+    def test_the_tabs_for_no_problems_say_so(self):
+        wb, _ = build([make_story(key="G-1", epic="E-1")])
+        self.assertIn("No changes are suggested.", wb[CHANGES]["A3"].value)
+        self.assertIn("No duplicate or related stories were found.", wb[DUPLICATES]["A3"].value)
+        self.assertIn("No themes were found.", wb[THEMES]["A3"].value)
 
 
 class CliWorkbookTests(unittest.TestCase):

@@ -11,7 +11,7 @@ from refiner.measures import count_by_group, count_by_label, count_row
 from refiner.model import Story, load_snapshot
 from refiner.rules import RulesError, parse_rules
 from refiner.runner import check_all
-from tests.helpers import RULES_PATH, SNAPSHOT_PATH, make_story, rules_with
+from tests.helpers import ROOT, RULES_PATH, SNAPSHOT_PATH, make_story, rules_with
 
 GENERATED = "2026-11-25 10:00"
 ALLOWED_TAGS = {"p", "em", "strong", "h2", "h3", "ul", "li", "table", "tbody", "tr", "th", "td", "span"}
@@ -23,6 +23,11 @@ def build(stories=None, rules=None):
     stories = stories if stories is not None else load_snapshot(SNAPSHOT_PATH)
     summary = check_all(stories, rules)
     return build_sections(summary, rules, GENERATED), summary, rules
+
+
+def named(sections, title):
+    """The section with this title (Summary, By epic, Themes, By label or Not checked)."""
+    return next(s for s in sections if s.title == title)
 
 
 def parse(section):
@@ -41,7 +46,8 @@ class StorageFormatTests(unittest.TestCase):
         self.sections, self.summary, self.rules = build()
 
     def test_three_sections_in_page_order_with_the_ids_from_the_rules(self):
-        self.assertEqual([s.id for s in self.sections], ["refiner-summary", "refiner-labels", "refiner-not-checked"])
+        self.assertEqual([s.id for s in self.sections],
+                         ["refiner-summary", "refiner-epics", "refiner-themes", "refiner-labels", "refiner-not-checked"])
 
     def test_every_section_is_well_formed(self):
         for section in self.sections:
@@ -66,7 +72,7 @@ class StorageFormatTests(unittest.TestCase):
         nasty = Story.from_dict(dict(key="N-1", summary="x", labels=['<script>alert(1)</script>', 'a&b "quoted"', "it's"],
                                      description="d", acceptance_criteria="a", story_points=2))
         sections, _, _ = build([nasty])
-        labels = sections[1]
+        labels = named(sections, "By label")
         root = parse(labels)                                   # still well formed
         self.assertNotIn("<script>", labels.html)
         names = [row[0] for row in table_rows(root)[1:]]
@@ -78,7 +84,11 @@ class StorageFormatTests(unittest.TestCase):
 class ContentTests(unittest.TestCase):
     def setUp(self):
         self.sections, self.summary, self.rules = build()
-        self.summary_section, self.labels_section, self.skipped_section = self.sections
+        self.summary_section = named(self.sections, "Summary")
+        self.labels_section = named(self.sections, "By label")
+        self.skipped_section = named(self.sections, "Not checked")
+        self.epics_section = named(self.sections, "By epic")
+        self.themes_section = named(self.sections, "Themes")
 
     def test_banner_title_date_version_and_total(self):
         text = "".join(parse(self.summary_section).itertext())
@@ -121,7 +131,7 @@ class ContentTests(unittest.TestCase):
         done = make_story(key="D-1", status="Done")
         for stories in ([bug, done, make_story(key="G-1")], [done, bug, make_story(key="G-1")]):
             sections, _, _ = build(stories)
-            reasons = [row[0] for row in table_rows(parse(sections[2]))[1:]]
+            reasons = [row[0] for row in table_rows(parse(named(sections, "Not checked")))[1:]]
             self.assertEqual(reasons, ["issue type 'Bug' is not in scope", "status 'Done' is ignored"])
 
     def test_explanations_use_the_thresholds_from_the_rules_file(self):
@@ -151,14 +161,81 @@ class ContentTests(unittest.TestCase):
 
     def test_nothing_skipped_says_so(self):
         sections, _, _ = build([make_story(key="A-1")])
-        self.assertIn("Every story in the snapshot was checked.", "".join(parse(sections[2]).itertext()))
+        self.assertIn("Every story in the snapshot was checked.", "".join(parse(named(sections, "Not checked")).itertext()))
 
     def test_empty_snapshot_still_gives_valid_sections(self):
         sections, _, _ = build([])
         for section in sections:
             parse(section)
-        self.assertIn("No stories were checked.", "".join(parse(sections[1]).itertext()))
+        self.assertIn("No stories were checked.", "".join(parse(named(sections, "By label")).itertext()))
+        self.assertIn("No themes were found.", "".join(parse(named(sections, "Themes")).itertext()))
         self.assertIn("At a glance: Suggest split 0, Missing info 0, Needs review 0, Looks good 0.", "".join(parse(sections[0]).itertext()))
+
+
+def build_program(edit=None):
+    """The made-up program fixture: epics, duplicates, themes and stories waiting to be uploaded."""
+    from datetime import date
+    from refiner.model import load_data
+    rules = rules_with(edit)
+    data = load_data(ROOT / "fixtures" / "program.json")
+    summary = check_all(data.stories, rules, data.epics, today=date(2026, 11, 25))
+    return build_sections(summary, rules, GENERATED), summary, rules
+
+
+class EpicAndThemeSectionTests(unittest.TestCase):
+    def setUp(self):
+        self.sections, self.summary, self.rules = build_program()
+        self.epics = named(self.sections, "By epic")
+        self.themes = named(self.sections, "Themes")
+
+    def test_epic_table_matches_the_shared_counts_with_no_epic_last(self):
+        from refiner.measures import count_by_epic
+        rows = table_rows(parse(self.epics))
+        self.assertEqual(rows[0], ["Epic"] + COLUMNS)
+        expected = []
+        for key, (name, counts) in count_by_epic(self.summary.results, self.summary.analysis.epics).items():
+            label = f"{key} {name}".strip() if name else key
+            expected.append([label] + [str(counts[c]) for c in COLUMNS])
+        self.assertEqual(rows[1:], expected)
+        self.assertEqual(rows[-1][0], "No epic")
+        self.assertEqual(rows[1][0], "EPIC-1 Terraform migration")
+
+    def test_the_coverage_sentence_says_how_many_stories_have_no_epic(self):
+        text = "".join(parse(self.epics).itertext())
+        self.assertIn("6 stories have no epic. The goal is none.", text)
+
+    def test_the_sentence_changes_for_one_and_for_none(self):
+        one = [make_story(key="A-1", epic="E-1"), make_story(key="A-2", epic="")]
+        sections, _, _ = build(one)
+        self.assertIn("1 story has no epic.", "".join(parse(named(sections, "By epic")).itertext()))
+        sections, _, _ = build([make_story(key="A-1", epic="E-1")])
+        self.assertIn("Every story has an epic.", "".join(parse(named(sections, "By epic")).itertext()))
+
+    def test_no_epic_is_shown_even_when_it_is_zero(self):
+        sections, _, _ = build([make_story(key="A-1", epic="E-1")])
+        rows = table_rows(parse(named(sections, "By epic")))
+        self.assertEqual(rows[-1][:2], ["No epic", "0"])
+
+    def test_themes_table_is_counts_only(self):
+        rows = table_rows(parse(self.themes))
+        self.assertEqual(rows[0], ["Theme", "Where from", "Titles", "Start with it"])
+        terraform = next(r for r in rows if r[0] == "Terraform")
+        self.assertEqual(terraform, ["Terraform", "Listed in the rules file", "6", "5"])
+        text = "".join(parse(self.themes).itertext())
+        self.assertNotIn("P-3", text)                             # no story keys on the page
+        self.assertIn("Found by counting", text)
+
+    def test_the_columns_explain_the_new_measures(self):
+        text = "".join(parse(named(self.sections, "Summary")).itertext())
+        for name in ("Epic needs attention", "Possible duplicate", "Title needs attention", "Labels need attention"):
+            self.assertIn(name, text)
+        self.assertIn("has no epic, or its epic has finished or ended.", text)
+
+    def test_all_sections_are_well_formed_and_use_only_allowed_tags(self):
+        for section in self.sections:
+            for element in parse(section).iter():
+                if element.tag != "root":
+                    self.assertIn(element.tag, ALLOWED_TAGS, f"{section.id}: <{element.tag}>")
 
 
 class CountsOnlyTests(unittest.TestCase):
@@ -166,14 +243,15 @@ class CountsOnlyTests(unittest.TestCase):
         stories = [
             Story.from_dict(dict(key="SECRET-1", summary="Confidential summary words", description="Private description words",
                                  acceptance_criteria="Hidden criteria words", story_points=2, assignee="Jane Q. Public",
-                                 epic="EPIC-SECRET", sprint="Sprint Secret", labels=["team-a"],
+                                 epic="EPIC-1", sprint="Sprint Secret", labels=["team-a"],
                                  extra={"Reporter": "John Smith"})),
         ]
         sections, _, _ = build(stories)
         everything = " ".join(s.html for s in sections)
-        for hidden in ("SECRET-1", "Confidential", "Private description", "Hidden criteria", "Jane", "EPIC-SECRET", "Sprint Secret", "John Smith"):
+        for hidden in ("SECRET-1", "Confidential", "Private description", "Hidden criteria", "Jane", "Sprint Secret", "John Smith"):
             self.assertNotIn(hidden, everything)
         self.assertIn("team-a", everything)                      # a label is a category, not a person or a story
+        self.assertIn("EPIC-1", everything)                      # and so is an epic
 
 
 class ColorTests(unittest.TestCase):
@@ -210,7 +288,7 @@ class MarkerTests(unittest.TestCase):
     def test_markers_follow_the_rules_file(self):
         rules = rules_with(lambda d: d["confluence"].update(marker_start="[[{id}:begin]]", marker_end="[[{id}:finish]]"))
         sections, _, _ = build(rules=rules)
-        self.assertEqual(sections[1].markers(rules), ("[[refiner-labels:begin]]", "[[refiner-labels:finish]]"))
+        self.assertEqual(named(sections, "By label").markers(rules), ("[[refiner-labels:begin]]", "[[refiner-labels:finish]]"))
 
     def test_section_ids_follow_the_rules_file(self):
         rules = rules_with(lambda d: d["confluence"]["section_ids"].update(summary="team-summary"))
@@ -219,11 +297,12 @@ class MarkerTests(unittest.TestCase):
 
     def test_with_markers_wraps_the_body_in_order(self):
         sections, _, rules = build()
-        wrapped = sections[2].with_markers(rules)
+        last = named(sections, "Not checked")
+        wrapped = last.with_markers(rules)
         lines = wrapped.splitlines()
         self.assertEqual(lines[0], "<!-- refiner-not-checked START -->")
         self.assertEqual(lines[-1], "<!-- refiner-not-checked END -->")
-        self.assertIn(sections[2].html, wrapped)
+        self.assertIn(last.html, wrapped)
 
     def test_same_input_gives_the_same_html(self):
         first = [s.html for s in build()[0]]
@@ -241,8 +320,8 @@ class WriteTests(unittest.TestCase):
     def test_files_manifest_and_preview(self):
         manifest = write_sections(self.folder, self.sections, self.rules, GENERATED)
         self.assertEqual(sorted(p.name for p in self.folder.iterdir()),
-                         ["manifest.json", "preview.html", "section-refiner-labels.html",
-                          "section-refiner-not-checked.html", "section-refiner-summary.html"])
+                         ["manifest.json", "preview.html", "section-refiner-epics.html", "section-refiner-labels.html",
+                          "section-refiner-not-checked.html", "section-refiner-summary.html", "section-refiner-themes.html"])
         self.assertEqual(json.loads((self.folder / "manifest.json").read_text()), manifest)
         first = manifest["sections"][0]
         self.assertEqual(first, {"id": "refiner-summary", "title": "Summary", "file": "section-refiner-summary.html",
@@ -298,7 +377,9 @@ class RulesTests(unittest.TestCase):
         rules = rules_with()
         self.assertEqual(rules.confluence_marker_start, "<!-- {id} START -->")
         self.assertFalse(rules.confluence_include_markers)
-        self.assertEqual(rules.confluence_section_ids, {"summary": "refiner-summary", "labels": "refiner-labels", "not_checked": "refiner-not-checked"})
+        self.assertEqual(rules.confluence_section_ids, {"summary": "refiner-summary", "labels": "refiner-labels",
+                                                          "not_checked": "refiner-not-checked", "epics": "refiner-epics",
+                                                          "themes": "refiner-themes"})
 
     def test_marker_must_contain_the_id_placeholder(self):
         found = self.problems(self.TEXT.replace('marker_start: "<!-- {id} START -->"', 'marker_start: "<!-- START -->"'))
@@ -342,7 +423,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("section-refiner-summary.html", text)
         self.assertIn("<!-- refiner-summary START --> ... <!-- refiner-summary END -->", text)
         self.assertIn("manifest.json", names)
-        self.assertEqual(len(names), 5)
+        self.assertEqual(len(names), 7)
 
     def test_include_markers_flag(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -6,6 +6,10 @@ Tabs, in order:
                       so filtering or editing Findings never leaves the numbers behind.
   Findings            one row per checked story, weak cells shaded by severity, with a comment saying why
   Suggestions         one row per story that has a draft, plus an "Approved?" column for later use
+  Changes             every concrete edit, one row per field: what is there now and what to put there
+  Epics               the team's epics (current and future first) with story counts, and the stories that need an epic
+  Duplicates          pairs of stories that are possible duplicates or just related
+  Themes              words in several titles, and whether titles start with them
   Raw Jira data       every story in the snapshot, every Jira field, original text, column order from rules.yaml
   Rules in effect     a copy of the rules that produced this file
 
@@ -23,14 +27,18 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.hyperlink import Hyperlink
 
-from .measures import GROUP_TITLES, MEASURES, VERDICT_COLUMNS, NO_LABEL, count_by_group, has_any, label_key
+from .changes import build_changes
+from .measures import (GROUP_TITLES, MEASURES, NO_EPIC, NO_LABEL, VERDICT_COLUMNS, count_by_epic, count_by_group, epic_key,
+                       has_any, label_key, shown_groups)
 from .runner import out_of_scope_reason
 from .suggest import LABEL as SUGGESTION_LABEL
-from .text import plain_text
+from .text import natural_key, plain_text
+from .themes import prefix_title
 from .yamlcheck import dotted
 
-TOC, SUMMARY, FINDINGS, SUGGESTIONS, RAW, RULES = (
-    "Table of Contents", "Summary", "Findings", "Suggestions", "Raw Jira data", "Rules in effect")
+TOC, SUMMARY, FINDINGS, SUGGESTIONS, CHANGES, EPICS, DUPLICATES, THEMES, RAW, RULES = (
+    "Table of Contents", "Summary", "Findings", "Suggestions", "Changes", "Epics", "Duplicates", "Themes",
+    "Raw Jira data", "Rules in effect")
 
 FONT = "Arial"
 HEADER_FILL = PatternFill("solid", fgColor="1F3864")
@@ -51,11 +59,16 @@ def build_workbook(summary, stories, suggestions, rules, context=None, generated
     wb = Workbook()
     toc = wb.active
     toc.title = TOC
-    sheets = {name: wb.create_sheet(name) for name in (SUMMARY, FINDINGS, SUGGESTIONS, RAW, RULES)}
+    sheets = {name: wb.create_sheet(name) for name in (SUMMARY, FINDINGS, SUGGESTIONS, CHANGES, EPICS, DUPLICATES, THEMES, RAW, RULES)}
+    changes = build_changes(summary, suggestions, rules)
 
     findings_cols = _write_findings(sheets[FINDINGS], summary, rules)
     raw_cols = _write_raw(sheets[RAW], summary, stories, rules)
     _write_suggestions(sheets[SUGGESTIONS], summary, suggestions, rules)
+    _write_changes(sheets[CHANGES], changes, rules)
+    _write_epics(sheets[EPICS], summary, suggestions, rules, findings_cols)
+    _write_duplicates(sheets[DUPLICATES], summary, rules)
+    _write_themes(sheets[THEMES], summary, rules)
     total_cell = _write_summary(sheets[SUMMARY], summary, rules, findings_cols, raw_cols)
     _write_rules(sheets[RULES], rules)
     _write_toc(toc, summary, rules, context, generated, total_cell)
@@ -152,9 +165,10 @@ def _shade(rules, flags, field_to_column, column_index, ws, row, comments):
             cell.comment = comment
 
 
-def _key_cell(ws, row, col, key, rules):
+def _key_cell(ws, row, col, key, rules, group=""):
+    """A story key. It links to the story in Jira when an address is set, except for stories not in Jira yet."""
     cell = _text(ws, row, col, key)
-    if rules.jira_base_url:
+    if rules.jira_base_url and group != "intake":
         cell.hyperlink = f"{rules.jira_base_url}/browse/{key}"
         cell.font = Font(name=FONT, size=10, color="0563C1", underline="single")
     return cell
@@ -180,8 +194,11 @@ def _quote(sheet_name):
 
 _FINDINGS_TITLES = ["Key", "Type", "Group", "Sprint", "Epic", "Labels", "Assignee", "Points", "Summary", "Verdict",
                     "Worst severity", "Description", "Acceptance criteria"] + [m[0] for m in MEASURES] + \
-                   ["Findings", "Details", "Label key (used by Summary)"]
-_FINDINGS_WIDTHS = [12, 9, 17, 14, 12, 18, 18, 8, 40, 15, 10, 58, 58, 10, 14, 16, 30, 70, 22]
+                   ["Findings", "Details", "Label key (used by Summary)", "Epic key (used by Summary)"]
+_FINDINGS_WIDTH = {"Key": 12, "Type": 9, "Group": 17, "Sprint": 14, "Epic": 12, "Labels": 18, "Assignee": 18, "Points": 8,
+                   "Summary": 40, "Verdict": 15, "Worst severity": 10, "Description": 58, "Acceptance criteria": 58,
+                   "Findings": 30, "Details": 70, "Label key (used by Summary)": 22, "Epic key (used by Summary)": 22}
+_FINDINGS_WIDTHS = [_FINDINGS_WIDTH.get(title, 15) for title in _FINDINGS_TITLES]      # measure columns default to 15
 
 
 def _write_findings(ws, summary, rules):
@@ -192,7 +209,7 @@ def _write_findings(ws, summary, rules):
     for offset, result in enumerate(summary.results):
         row = 3 + offset
         story = result.story
-        _key_cell(ws, row, index["Key"], story.key, rules)
+        _key_cell(ws, row, index["Key"], story.key, rules, story.group)
         _text(ws, row, index["Type"], story.issue_type)
         _text(ws, row, index["Group"], GROUP_TITLES[story.group])
         _text(ws, row, index["Sprint"], story.sprint)
@@ -211,6 +228,7 @@ def _write_findings(ws, summary, rules):
         _text(ws, row, index["Findings"], "; ".join(f.code for f in result.flags))
         _text(ws, row, index["Details"], "\n".join(f"[{f.severity}] {f.message}" for f in result.flags), wrap=True)
         _text(ws, row, index["Label key (used by Summary)"], label_key(story), color="7F7F7F")
+        _text(ws, row, index["Epic key (used by Summary)"], epic_key(story), color="7F7F7F")
         _shade(rules, result.flags, _FINDINGS_FIELD_COLUMN, index, ws, row, comments=True)
 
     _finish_table(ws, 2, _FINDINGS_TITLES, 2 + len(summary.results))
@@ -264,7 +282,7 @@ def _write_raw(ws, summary, stories, rules):
             else:
                 value = story.extra.get(column[:-7] if column.endswith(" (Jira)") else column, "")
             if column == "Key":
-                _key_cell(ws, row, index[column], value, rules)
+                _key_cell(ws, row, index[column], value, rules, story.group)
             else:
                 _text(ws, row, index[column], value)
         if result:
@@ -293,10 +311,11 @@ def _write_suggestions(ws, summary, suggestions, rules):
     _header(ws, 2, _SUGGESTION_TITLES, _SUGGESTION_WIDTHS)
     index = {title: i for i, title in enumerate(_SUGGESTION_TITLES, start=1)}
     summaries = {r.story.key: plain_text(r.story.summary) for r in summary.results}
+    groups = {r.story.key: r.story.group for r in summary.results}
 
     row = 3
     for key, s in suggestions.items():
-        _key_cell(ws, row, index["Key"], key, rules)
+        _key_cell(ws, row, index["Key"], key, rules, groups.get(key, ""))
         _text(ws, row, index["Summary"], summaries.get(key, ""), wrap=True)
         _text(ws, row, index["Verdict"], s.verdict)
         _text(ws, row, index["Status"], s.label, wrap=True)
@@ -321,6 +340,176 @@ def _write_suggestions(ws, summary, suggestions, rules):
         letter = get_column_letter(index["Approved?"])
         approval.add(f"{letter}3:{letter}{row - 1}")
     _finish_table(ws, 2, _SUGGESTION_TITLES, row - 1)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Changes
+# ---------------------------------------------------------------------------------------------------
+
+_CHANGE_TITLES = ["Key", "Group", "Field", "Kind", "Current", "Suggested", "Reason", "Done?"]
+_CHANGE_WIDTHS = [12, 17, 18, 9, 45, 55, 55, 9]
+
+
+def _write_changes(ws, changes, rules):
+    _banner(ws, rules)
+    _header(ws, 2, _CHANGE_TITLES, _CHANGE_WIDTHS)
+    row = 3
+    for change in changes:
+        _key_cell(ws, row, 1, change.key, rules, change.group)
+        _text(ws, row, 2, GROUP_TITLES[change.group])
+        _text(ws, row, 3, change.field)
+        _text(ws, row, 4, change.kind)
+        _text(ws, row, 5, change.current, wrap=True)
+        _text(ws, row, 6, change.suggested, wrap=True)
+        _text(ws, row, 7, change.reason, wrap=True)
+        ws.cell(row=row, column=8).fill = INPUT_FILL
+        row += 1
+    if not changes:
+        _text(ws, 3, 1, "No changes are suggested.", italic=True)
+    else:
+        done = DataValidation(type="list", formula1='"Y,N"', allow_blank=True, showErrorMessage=True,
+                              errorTitle="Done?", error="Type Y or N, or leave it empty.")
+        ws.add_data_validation(done)
+        done.add(f"H3:H{row - 1}")
+    _finish_table(ws, 2, _CHANGE_TITLES, row - 1)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Epics
+# ---------------------------------------------------------------------------------------------------
+
+_EPIC_TITLES = ["Epic", "Name", "Status", "Start", "End", "Current or future?", "Stories"]
+_EPIC_WIDTHS = [14, 40, 14, 12, 12, 18, 10]
+
+
+def _write_epics(ws, summary, suggestions, rules, findings_cols):
+    _banner(ws, rules)
+    _header(ws, 2, _EPIC_TITLES, _EPIC_WIDTHS)
+    analysis = summary.analysis
+    active = {e.key for e in analysis.active_epics}
+    helper = findings_cols["Epic key (used by Summary)"]
+    column = f"{_quote(FINDINGS)}!${helper}:${helper}"
+
+    row = 3
+    for epic in sorted(analysis.epics, key=lambda e: (e.key not in active, natural_key(e.key))):
+        _key_cell(ws, row, 1, epic.key, rules)
+        _text(ws, row, 2, epic.name)
+        _text(ws, row, 3, epic.status)
+        _text(ws, row, 4, str(epic.start_date or ""))
+        _text(ws, row, 5, str(epic.end_date or ""))
+        _text(ws, row, 6, "Yes" if epic.key in active else "No")
+        _formula(ws, row, 7, f"=COUNTIFS({column},$A{row})")
+        row += 1
+    _text(ws, row, 1, NO_EPIC, bold=True)
+    _formula(ws, row, 7, f"=COUNTIFS({column},$A{row})", bold=True)
+    _finish_table(ws, 2, _EPIC_TITLES, row)
+
+    row += 2
+    _text(ws, row, 1, f"Current or future means not finished and not past its end date, as of {analysis.today}. "
+                      "The Stories column is a formula on the Findings tab. 'No epic' should be 0.", italic=True, size=9, color="595959")
+
+    # To the right of the epic list (its own, wider columns): the stories that need an epic, then new-epic ideas.
+    left = len(_EPIC_TITLES) + 2                     # one empty column between the two tables
+    for offset, width in enumerate([12, 40, 12, 50]):
+        ws.column_dimensions[get_column_letter(left + offset)].width = width
+    needing = [r for r in summary.results if {f.code for f in r.flags} & {"epic_missing", "epic_inactive"}]
+    _text(ws, 1, left, "Stories that need an epic", bold=True, size=12)
+    for index, title in enumerate(["Story", "Summary", "Epic now", "Suggestion"]):
+        _text(ws, 2, left + index, title, bold=True, color="FFFFFF", fill=HEADER_FILL)
+    row = 2
+    if not needing:
+        row += 1
+        _text(ws, row, left, "Every story has a current or future epic.", italic=True)
+    for result in sorted(needing, key=lambda r: natural_key(r.story.key)):
+        row += 1
+        story, found = result.story, suggestions.get(result.story.key)
+        if found and found.epic_options:
+            idea = "; ".join(f"{k} {n} ({round(sc * 100)}%)" for k, n, sc in found.epic_options)
+        elif found and found.new_epic:
+            idea = found.new_epic
+        else:
+            idea = "No existing epic fits well. Choose one."
+        _key_cell(ws, row, left, story.key, rules, story.group)
+        _text(ws, row, left + 1, plain_text(story.summary), wrap=True)
+        _text(ws, row, left + 2, story.epic)
+        _text(ws, row, left + 3, idea, wrap=True)
+
+    if analysis.new_epics:
+        row += 3
+        _text(ws, row, left, "Ideas for new epics (stories that share a word and fit no current epic)", bold=True, size=12)
+        row += 1
+        for index, title in enumerate(["Name", "Stories"]):
+            _text(ws, row, left + index, title, bold=True, color="FFFFFF", fill=HEADER_FILL)
+        for proposal in analysis.new_epics:
+            row += 1
+            _text(ws, row, left, proposal.name)
+            _text(ws, row, left + 1, ", ".join(proposal.keys), wrap=True)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Duplicates
+# ---------------------------------------------------------------------------------------------------
+
+_DUP_TITLES = ["Kind", "Alike", "Story A", "Title A", "Group A", "Story B", "Title B", "Group B", "Note"]
+_DUP_WIDTHS = [18, 9, 12, 40, 17, 12, 40, 17, 36]
+
+
+def _write_duplicates(ws, summary, rules):
+    _banner(ws, rules)
+    _header(ws, 2, _DUP_TITLES, _DUP_WIDTHS)
+    stories = {r.story.key: r.story for r in summary.results}
+    row = 3
+    for pair in summary.analysis.pairs:
+        a, b = stories.get(pair.a.key, pair.a), stories.get(pair.b.key, pair.b)
+        _text(ws, row, 1, "Possible duplicate" if pair.kind == "duplicate" else "Related")
+        _text(ws, row, 2, round(pair.score, 2)).number_format = "0%"
+        _key_cell(ws, row, 3, a.key, rules, a.group)
+        _text(ws, row, 4, plain_text(a.summary), wrap=True)
+        _text(ws, row, 5, GROUP_TITLES[a.group])
+        _key_cell(ws, row, 6, b.key, rules, b.group)
+        _text(ws, row, 7, plain_text(b.summary), wrap=True)
+        _text(ws, row, 8, GROUP_TITLES[b.group])
+        waiting = [x.key for x in (a, b) if x.group == "intake"]
+        if pair.kind == "duplicate" and len(waiting) == 1:
+            _text(ws, row, 9, f"{waiting[0]} is not in Jira yet. The other one already is.")
+        elif pair.kind == "duplicate":
+            _text(ws, row, 9, "Close or merge one of them.")
+        else:
+            _text(ws, row, 9, "Fine as they are. Consider grouping them.")
+        row += 1
+    if not summary.analysis.pairs:
+        _text(ws, 3, 1, "No duplicate or related stories were found.", italic=True)
+    _finish_table(ws, 2, _DUP_TITLES, row - 1)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Themes
+# ---------------------------------------------------------------------------------------------------
+
+_THEME_TITLES = ["Theme", "Where from", "Titles", "Start with it", "Consistent?", "Mention it but do not start with it",
+                 "Suggested titles (listed themes only)"]
+_THEME_WIDTHS = [16, 22, 8, 12, 12, 50, 55]
+
+
+def _write_themes(ws, summary, rules):
+    _banner(ws, rules)
+    _header(ws, 2, _THEME_TITLES, _THEME_WIDTHS)
+    stories = {r.story.key: r.story for r in summary.results}
+    row = 3
+    for theme in summary.analysis.themes:
+        rest = [k for k in theme.keys if k not in theme.starting]
+        _text(ws, row, 1, theme.word)
+        _text(ws, row, 2, "Listed in the rules file" if theme.known else "Found by counting")
+        _text(ws, row, 3, len(theme.keys))
+        _text(ws, row, 4, len(theme.starting))
+        _text(ws, row, 5, "Yes" if theme.consistent else "No")
+        _text(ws, row, 6, "\n".join(f"{k}: {plain_text(stories[k].summary)}" for k in rest), wrap=True)
+        suggested = [f"{k}: {prefix_title(theme, plain_text(stories[k].summary), rules)}" for k in rest] if theme.known else []
+        _text(ws, row, 7, "\n".join(suggested), wrap=True)
+        row += 1
+    if not summary.analysis.themes:
+        _text(ws, 3, 1, "No themes were found.", italic=True)
+    _finish_table(ws, 2, _THEME_TITLES, row - 1)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -358,14 +547,15 @@ def _write_summary(ws, summary, rules, findings_cols, raw_cols):
     _text(ws, 3, 1, "Every number below is a formula that counts rows on the Findings tab. Filter Findings to see the stories behind a number.",
           italic=True, size=9, color="595959")
     ws.column_dimensions["A"].width = 26
-    for letter in "BCDEFGHI":
-        ws.column_dimensions[letter].width = 15
+    for number in range(2, 3 + len(_SUMMARY_COLUMNS)):
+        ws.column_dimensions[get_column_letter(number)].width = 15
+    ws.column_dimensions[get_column_letter(2 + len(_SUMMARY_COLUMNS))].width = 30         # the epic name column
 
     # --- by group -----------------------------------------------------------------------------------
     header = 5
     _text(ws, 4, 1, "By group", bold=True)
     _summary_header(ws, header, "Group")
-    groups = [GROUP_TITLES[g] for g in rules.include_groups]
+    groups = [GROUP_TITLES[g] for g in shown_groups(summary.results, rules.include_groups)]
     for offset, title in enumerate(groups):
         row = header + 1 + offset
         _text(ws, row, 1, title)
@@ -378,10 +568,27 @@ def _write_summary(ws, summary, rules, findings_cols, raw_cols):
         letter = get_column_letter(col)
         _formula(ws, total_row, col, f"=SUM({letter}{first}:{letter}{last})", bold=True)
 
+    # --- by epic ------------------------------------------------------------------------------------
+    epic_rows = count_by_epic(summary.results, summary.analysis.epics if summary.analysis else ())
+    epic_header = total_row + 3
+    name_col = 2 + len(_SUMMARY_COLUMNS)
+    _text(ws, epic_header - 1, 1, "By epic", bold=True)
+    _text(ws, epic_header - 1, 4, "Every story should have an epic: the 'No epic' row should be 0. The list of epics was taken from this run.",
+          italic=True, size=9, color="595959")
+    _summary_header(ws, epic_header, "Epic")
+    _text(ws, epic_header, name_col, "Epic name", bold=True, color="FFFFFF", fill=HEADER_FILL, wrap=True, valign="center")
+    epic_col = findings_cols["Epic key (used by Summary)"]
+    for offset, (key, (name, _)) in enumerate(epic_rows.items()):
+        row = epic_header + 1 + offset
+        _text(ws, row, 1, key)
+        for col, formula in enumerate(_count_formulas(row, epic_header, findings_cols, f"$A{row}", epic_col), start=2):
+            _formula(ws, row, col, formula)
+        _text(ws, row, name_col, name or ("" if key == NO_EPIC else "(not in the epic list)"))
+
     # --- by label -----------------------------------------------------------------------------------
     labels = sorted({label for r in summary.results for label in ([x for x in r.story.labels if x] or [NO_LABEL])},
                     key=lambda x: (x == NO_LABEL, x.lower()))
-    label_header = total_row + 3
+    label_header = epic_header + len(epic_rows) + 3
     _text(ws, label_header - 1, 1, "By label", bold=True)
     _text(ws, label_header - 1, 4, "A story with several labels counts under each one, so these rows can add up to more than the total.",
           italic=True, size=9, color="595959")
@@ -458,6 +665,7 @@ def _write_toc(ws, summary, rules, context, generated, total_cell):
     facts = [
         ("Generated", generated),
         ("Rules version", rules.version),
+        ("When it runs", rules.schedule_note or "Not set (see schedule.note in rules.yaml)"),
         ("In scope", f"{', '.join(GROUP_TITLES[g] for g in rules.include_groups)}; types: {', '.join(rules.issue_types)}; "
                      f"statuses ignored: {', '.join(str(x) for x in rules.raw['scope']['ignore_statuses']) or 'none'}"),
         ("Context used", ", ".join(context.files_read) if context and context.files_read else "none"),
@@ -478,6 +686,10 @@ def _write_toc(ws, summary, rules, context, generated, total_cell):
         (SUMMARY, "Counts by group and by label. Formulas that read the Findings tab."),
         (FINDINGS, "One row per checked story, with its verdict. Weak or missing cells are shaded; hover for the reason. Shows plain text."),
         (SUGGESTIONS, "Drafts for stories that are not 'Looks good': description, acceptance criteria, questions, split ideas. Fill in 'Approved?' with Y or N."),
+        (CHANGES, "Every concrete edit, one row per field: what is there now and what to put there. Mark 'Done?' as you go. The same list is in changes.csv and the update pack."),
+        (EPICS, "The team's epics, current and future first, with story counts, plus the stories that still need an epic and ideas for new epics."),
+        (DUPLICATES, "Pairs of stories that are possible duplicates (close or merge one) or just related (fine, and worth grouping)."),
+        (THEMES, "Words found in several titles, and whether titles start with them. Listed themes also get suggested titles."),
         (RAW, "Every story in the snapshot with every Jira field and the original Jira text. Filter and search here."),
         (RULES, "The rules that produced this file."),
     ]

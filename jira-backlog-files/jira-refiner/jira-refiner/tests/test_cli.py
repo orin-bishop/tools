@@ -99,3 +99,115 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+PROGRAM = ROOT / "fixtures" / "program.json"
+INTAKE = ROOT / "fixtures" / "intake.csv"
+TODAY = ("--today", "2026-11-25")
+
+
+class ProgramCliTests(unittest.TestCase):
+    def test_check_shows_what_was_found_across_stories(self):
+        code, text = run("check", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), *TODAY)
+        self.assertEqual(code, 0)
+        self.assertIn("Across stories:", text)
+        self.assertIn("Possible duplicate pairs: 4 (related pairs: 5)", text)
+        self.assertIn("Stories that need an epic: 8 (with a suggested epic: 3)", text)
+        self.assertIn("New epic ideas: 1", text)
+        self.assertIn("Terraform (listed, 5 of 6 titles start with it)", text)
+
+    def test_the_epic_list_in_the_snapshot_is_used(self):
+        _, text = run("check", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--details", *TODAY)
+        self.assertIn("Epic EPIC-4 (Legacy cleanup) has status Done", text)
+
+    def test_today_changes_which_epics_are_current(self):
+        _, before = run("check", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--details", "--today", "2026-10-01")
+        self.assertNotIn("Epic EPIC-5 (Onboarding docs) ended", before)
+        _, after = run("check", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--details", *TODAY)
+        self.assertIn("Epic EPIC-5 (Onboarding docs) ended on 2026-10-31", after)
+
+    def test_a_bad_date_is_a_clean_error(self):
+        code, text = run("check", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--today", "next tuesday")
+        self.assertEqual(code, 2)
+        self.assertIn("Cannot use the date", text)
+
+    def test_an_intake_csv_adds_stories_that_are_not_in_jira_yet(self):
+        _, text = run("check", "--snapshot", str(PROGRAM), "--intake", str(INTAKE), "--rules", str(RULES_PATH), *TODAY)
+        self.assertIn("Checked 18 stories", text)
+        self.assertIn("NEW-4", text)
+        self.assertIn("intake", text)
+
+    def test_a_broken_intake_csv_is_a_clean_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            bad = Path(folder) / "bad.csv"
+            bad.write_text("Name\nx\n")
+            code, text = run("check", "--snapshot", str(PROGRAM), "--intake", str(bad), "--rules", str(RULES_PATH))
+        self.assertEqual(code, 2)
+        self.assertIn("needs a 'Summary'", text)
+
+    def test_suggest_prints_titles_epics_and_duplicates(self):
+        _, text = run("suggest", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--context", str(CONTEXT), *TODAY)
+        self.assertIn("Suggested title: Rotate the shared database credentials every 90 days", text)
+        self.assertIn("Suggested epic: EPIC-1 Terraform migration (50%)", text)
+        self.assertIn('New epic idea: Create an epic "Credentials"', text)
+        self.assertIn("Possible duplicate of: P-1 ('Terraform module for VPC', 100% alike)", text)
+
+    def test_suggest_prints_labels_to_add(self):
+        with tempfile.TemporaryDirectory() as folder:
+            rules = Path(folder) / "rules.yaml"
+            rules.write_text(RULES_PATH.read_text().replace("  required_all: []", "  required_all: [team-save]"))
+            _, text = run("suggest", "--snapshot", str(PROGRAM), "--rules", str(rules), "--context", str(CONTEXT), *TODAY)
+        self.assertIn("Labels to add: team-save", text)
+
+    def test_changes_writes_one_csv_row_per_edit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "changes.csv"
+            code, text = run("changes", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--context", str(CONTEXT),
+                             "--out", str(target), *TODAY)
+            with target.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(__import__("csv").DictReader(handle))
+        self.assertEqual(code, 0)
+        self.assertIn(f"{len(rows)} suggested edit(s)", text)
+        self.assertTrue(any(r["Key"] == "P-3" and r["Field"] == "Epic" and r["Suggested"] == "EPIC-1" for r in rows))
+
+    def test_update_pack_with_and_without_copy_buttons(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "pack.html"
+            code, text = run("update-pack", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--context", str(CONTEXT),
+                             "--out", str(target), "--generated", "x", *TODAY)
+            with_buttons = target.read_text()
+            run("update-pack", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--context", str(CONTEXT),
+                "--out", str(target), "--no-copy-buttons", *TODAY)
+            without = target.read_text()
+        self.assertEqual(code, 0)
+        self.assertIn("stories with suggested edits", text)
+        self.assertIn("<script>", with_buttons)
+        self.assertNotIn("<script", without)
+
+    def test_report_writes_everything_into_one_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "deep" / "out"
+            code, text = run("report", "--snapshot", str(PROGRAM), "--intake", str(INTAKE), "--rules", str(RULES_PATH),
+                             "--context", str(CONTEXT), "--out-dir", str(target), "--generated", "x", *TODAY)
+            names = sorted(p.name for p in target.iterdir())
+            sections = sorted(p.name for p in (target / "confluence").iterdir())
+            opened = load_workbook(target / "refinement-report.xlsx").sheetnames
+        self.assertEqual(code, 0)
+        self.assertEqual(names, ["changes.csv", "confluence", "refinement-report.xlsx", "update-pack.html"])
+        self.assertIn("manifest.json", sections)
+        self.assertIn("section-refiner-epics.html", sections)
+        self.assertIn("Epics", opened)
+        self.assertIn("18 stories checked", text)
+
+    def test_report_into_a_folder_it_cannot_create_is_a_clean_error(self):
+        code, text = run("report", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), "--context", str(CONTEXT),
+                         "--out-dir", "/proc/not-allowed/here", *TODAY)
+        self.assertEqual(code, 2)
+        self.assertIn("Cannot write the report", text)
+
+    def test_check_does_not_need_a_context_folder(self):
+        code, _ = run("check", "--snapshot", str(PROGRAM), "--rules", str(RULES_PATH), *TODAY)
+        self.assertEqual(code, 0)
+
+
+from openpyxl import load_workbook  # noqa: E402  (used by the report test)

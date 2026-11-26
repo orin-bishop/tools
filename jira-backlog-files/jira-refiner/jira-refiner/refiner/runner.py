@@ -2,6 +2,7 @@
 from collections import Counter
 from dataclasses import dataclass, field
 
+from .analysis import analyze
 from .checks import run_checks
 from .verdict import VERDICTS, verdict_for, worst_severity
 
@@ -18,6 +19,7 @@ class StoryResult:
 class RunSummary:
     results: list = field(default_factory=list)
     skipped: Counter = field(default_factory=Counter)    # reason -> how many stories
+    analysis: object = None                              # analysis.Analysis: duplicates, epics, themes
 
     def counts_by_verdict(self):
         counts = Counter(r.verdict for r in self.results)
@@ -35,14 +37,19 @@ def out_of_scope_reason(story, rules):
     return ""
 
 
-def check_all(stories, rules):
-    """Check every in-scope story. Returns a RunSummary."""
+def check_all(stories, rules, epics=(), today=None):
+    """Check every in-scope story, then look across them all (duplicates, epics, themes). Returns a RunSummary."""
     summary = RunSummary()
+    in_scope = []
     for story in stories:
         reason = out_of_scope_reason(story, rules)
         if reason:
             summary.skipped[reason] += 1
-            continue
-        flags = run_checks(story, rules)
+        else:
+            in_scope.append(story)
+
+    summary.analysis = analyze(in_scope, epics, rules, today)
+    for story in in_scope:
+        flags = run_checks(story, rules) + summary.analysis.flags.get(story.key, [])
         summary.results.append(StoryResult(story, flags, verdict_for(flags), worst_severity(flags)))
     return summary

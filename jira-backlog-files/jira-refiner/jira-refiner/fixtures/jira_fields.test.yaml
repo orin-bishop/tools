@@ -1,0 +1,12 @@
+# Filled-in field map for the made-up exports in fixtures/jira_export (tests only).
+fields_version: 1
+story_fields:
+  acceptance_criteria: customfield_10100
+  story_points: customfield_10101
+  epic_link: customfield_10102
+  sprint: customfield_10103
+epic_fields:
+  name: summary
+  start_date: ""
+  end_date: duedate
+extra_fields: all

@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .model import parse_date
 from .yamlcheck import Reader, SettingsError, load_yaml
 
 # The rules file and the hints file report problems the same way, so they share one error type.
@@ -31,11 +32,20 @@ CHECK_IDS = (
     "other_required_missing",
     "large_and_thin",
     "possibly_undersized",
+    "description_brief",
+    "ac_brief",
+    "title_long",
+    "epic_missing",
+    "epic_inactive",
+    "duplicate_story",
+    "labels_missing",
+    "label_unknown",
+    "labels_suggested",
 )
 LEVELS = ("high", "medium", "low")
-GROUPS = ("current_sprint", "future_sprints", "backlog")
+GROUPS = ("current_sprint", "future_sprints", "backlog", "intake")
 OTHER_FIELDS = ("epic", "labels", "assignee", "sprint")
-SECTION_KEYS = ("summary", "labels", "not_checked")      # the Confluence sections the tool writes
+SECTION_KEYS = ("summary", "labels", "not_checked", "epics", "themes")      # the Confluence sections the tool writes
 
 
 @dataclass(frozen=True)
@@ -49,10 +59,19 @@ class WorkPattern:
 
 
 @dataclass(frozen=True)
+class LabelRule:
+    """Suggest a label when a story mentions one of these words."""
+
+    label: str
+    words: tuple
+
+
+@dataclass(frozen=True)
 class Rules:
     """The rules, checked and ready to use. Built only by parse_rules()."""
 
     version: int
+    schedule_note: str              # shown on the reports, for example 'runs weekly before refinement'
     include_groups: tuple
     ignore_statuses: tuple          # lower case
     issue_types: tuple              # as written in the file
@@ -77,6 +96,33 @@ class Rules:
     max_points_before_keyword_review: float
     thin_chars: int
     work_patterns: tuple            # WorkPattern objects
+    description_brief_chars: int    # 0 = off
+    ac_brief_chars: int             # 0 = off
+    title_max_chars: int
+    title_suggest: bool
+    epics_enabled: bool
+    epics_required_groups: tuple
+    epics_ignore_statuses: tuple    # lower case
+    epics_min_match_score: float
+    epics_suggest_new: bool
+    epics_new_min_stories: int
+    epics_today: str                # '' = the real date, else YYYY-MM-DD
+    dup_enabled: bool
+    dup_duplicate_at: float
+    dup_related_at: float
+    dup_min_title_words: int
+    dup_title_weight: float
+    dup_description_weight: float
+    labels_enabled: bool
+    labels_required: tuple
+    labels_allowed: tuple
+    label_rules: tuple              # LabelRule objects
+    themes_enabled: bool
+    themes_min_stories: int
+    themes_known: tuple
+    themes_max_auto: int
+    themes_title_format: str
+    update_pack_copy_buttons: bool
     suggest_default_role: str
     suggest_max_ac: int
     suggest_max_questions: int
@@ -114,10 +160,13 @@ def parse_rules(text, source="rules.yaml"):
     """Check rules text and return a Rules object. Raises RulesError with every problem found."""
     data, lines = load_yaml(text, source)
     r = Reader(data, lines, source)
-    r.mapping([], ("rules_version", "scope", "fields", "summary_match", "sizing", "suggestions",
-                   "workbook", "confluence", "type_skips", "severity", "highlight"))
+    r.mapping([], ("rules_version", "schedule", "scope", "fields", "summary_match", "sizing", "suggestions",
+                   "workbook", "confluence", "titles", "epics", "duplicates", "labels", "themes", "update_pack",
+                   "type_skips", "severity", "highlight"))
 
     version = r.whole(["rules_version"], minimum=1)
+    r.mapping(["schedule"], ("note",))
+    schedule_note = r.optional_text(["schedule", "note"])
 
     r.mapping(["scope"], ("include", "ignore_statuses", "issue_types"))
     include = r.text_list(["scope", "include"], non_empty=True, options=GROUPS)
@@ -129,17 +178,23 @@ def parse_rules(text, source="rules.yaml"):
     summary_required = r.flag(["fields", "summary", "required"])
     summary_min = r.whole(["fields", "summary", "min_chars"])
 
-    r.mapping(["fields", "description"], ("required", "min_chars", "story_format"))
+    r.mapping(["fields", "description"], ("required", "min_chars", "brief_chars", "story_format"))
     description_required = r.flag(["fields", "description", "required"])
     description_min = r.whole(["fields", "description", "min_chars"])
+    description_brief = r.whole(["fields", "description", "brief_chars"])
+    if description_brief and description_brief < description_min:
+        r.bad(["fields", "description", "brief_chars"], f"must be 0 (off) or at least min_chars, which is {description_min}.")
     r.mapping(["fields", "description", "story_format"], ("enabled", "pattern", "allowed_roles"))
     format_enabled = r.flag(["fields", "description", "story_format", "enabled"])
     format_pattern = r.pattern(["fields", "description", "story_format", "pattern"])
     allowed_roles = r.text_list(["fields", "description", "story_format", "allowed_roles"])
 
-    r.mapping(["fields", "acceptance_criteria"], ("required", "min_chars", "vague_phrases"))
+    r.mapping(["fields", "acceptance_criteria"], ("required", "min_chars", "brief_chars", "vague_phrases"))
     ac_required = r.flag(["fields", "acceptance_criteria", "required"])
     ac_min = r.whole(["fields", "acceptance_criteria", "min_chars"])
+    ac_brief = r.whole(["fields", "acceptance_criteria", "brief_chars"])
+    if ac_brief and ac_brief < ac_min:
+        r.bad(["fields", "acceptance_criteria", "brief_chars"], f"must be 0 (off) or at least min_chars, which is {ac_min}.")
     vague = r.text_list(["fields", "acceptance_criteria", "vague_phrases"])
 
     r.mapping(["fields", "story_points"], ("required", "review_at_or_above"))
@@ -199,6 +254,55 @@ def parse_rules(text, source="rules.yaml"):
     ignore_words = r.text_list(["suggestions", "ignore_when_matching"])
     action_verbs = r.text_list(["suggestions", "action_verbs"])
 
+    r.mapping(["titles"], ("max_chars", "suggest"))
+    title_max = r.whole(["titles", "max_chars"], minimum=10)
+    title_suggest = r.flag(["titles", "suggest"])
+
+    r.mapping(["epics"], ("enabled", "required_groups", "ignore_statuses", "min_match_score", "suggest_new",
+                          "new_epic_min_stories", "today"))
+    epics_enabled = r.flag(["epics", "enabled"])
+    epics_groups = r.text_list(["epics", "required_groups"], options=GROUPS)
+    epics_ignore = r.text_list(["epics", "ignore_statuses"])
+    epics_score = r.number(["epics", "min_match_score"], minimum=0, maximum=1, allow_equal=False)
+    epics_suggest_new = r.flag(["epics", "suggest_new"])
+    epics_new_min = r.whole(["epics", "new_epic_min_stories"], minimum=2)
+    epics_today = r.optional_text(["epics", "today"])
+    if epics_today:
+        try:
+            parse_date(epics_today)
+        except ValueError:
+            r.bad(["epics", "today"], f'must be a date like 2026-12-01, or "" for today (found {epics_today!r}).')
+
+    r.mapping(["duplicates"], ("enabled", "duplicate_at", "related_at", "min_title_words", "title_weight", "description_weight"))
+    dup_enabled = r.flag(["duplicates", "enabled"])
+    dup_at = r.number(["duplicates", "duplicate_at"], minimum=0, maximum=1, allow_equal=False)
+    dup_related = r.number(["duplicates", "related_at"], minimum=0, maximum=1, allow_equal=False)
+    if dup_related > dup_at:
+        r.bad(["duplicates", "related_at"], f"must not be higher than duplicate_at, which is {dup_at:g}.")
+    dup_min_words = r.whole(["duplicates", "min_title_words"], minimum=1)
+    dup_tw = r.number(["duplicates", "title_weight"], minimum=0)
+    dup_dw = r.number(["duplicates", "description_weight"], minimum=0)
+    if dup_tw == 0 and dup_dw == 0:
+        r.bad(["duplicates", "title_weight"], "and description_weight cannot both be 0.")
+
+    r.mapping(["labels"], ("enabled", "required_all", "allowed", "suggest"))
+    labels_enabled = r.flag(["labels", "enabled"])
+    labels_required = r.text_list(["labels", "required_all"])
+    labels_allowed = r.text_list(["labels", "allowed"])
+    label_rules = _read_label_rules(r, ["labels", "suggest"])
+
+    r.mapping(["themes"], ("enabled", "min_stories", "known", "max_auto_themes", "title_format"))
+    themes_enabled = r.flag(["themes", "enabled"])
+    themes_min = r.whole(["themes", "min_stories"], minimum=2)
+    themes_known = r.text_list(["themes", "known"])
+    themes_auto = r.whole(["themes", "max_auto_themes"])
+    themes_format = r.text(["themes", "title_format"])
+    if themes_format and ("{theme}" not in themes_format or "{title}" not in themes_format):
+        r.bad(["themes", "title_format"], "must contain both {theme} and {title}.")
+
+    r.mapping(["update_pack"], ("copy_buttons",))
+    copy_buttons = r.flag(["update_pack", "copy_buttons"])
+
     type_skips = _read_type_skips(r, ["type_skips"])
 
     r.mapping(["severity"], CHECK_IDS)
@@ -212,6 +316,7 @@ def parse_rules(text, source="rules.yaml"):
 
     return Rules(
         version=version,
+        schedule_note=schedule_note,
         include_groups=tuple(include),
         ignore_statuses=tuple(s.lower() for s in ignore_statuses),
         issue_types=tuple(issue_types),
@@ -236,6 +341,33 @@ def parse_rules(text, source="rules.yaml"):
         max_points_before_keyword_review=max_keyword,
         thin_chars=thin,
         work_patterns=tuple(patterns),
+        description_brief_chars=description_brief,
+        ac_brief_chars=ac_brief,
+        title_max_chars=title_max,
+        title_suggest=title_suggest,
+        epics_enabled=epics_enabled,
+        epics_required_groups=tuple(epics_groups),
+        epics_ignore_statuses=tuple(x.lower() for x in epics_ignore),
+        epics_min_match_score=epics_score,
+        epics_suggest_new=epics_suggest_new,
+        epics_new_min_stories=epics_new_min,
+        epics_today=epics_today,
+        dup_enabled=dup_enabled,
+        dup_duplicate_at=dup_at,
+        dup_related_at=dup_related,
+        dup_min_title_words=dup_min_words,
+        dup_title_weight=dup_tw,
+        dup_description_weight=dup_dw,
+        labels_enabled=labels_enabled,
+        labels_required=tuple(labels_required),
+        labels_allowed=tuple(labels_allowed),
+        label_rules=tuple(label_rules),
+        themes_enabled=themes_enabled,
+        themes_min_stories=themes_min,
+        themes_known=tuple(themes_known),
+        themes_max_auto=themes_auto,
+        themes_title_format=themes_format,
+        update_pack_copy_buttons=copy_buttons,
         suggest_default_role=default_role,
         suggest_max_ac=max_ac,
         suggest_max_questions=max_questions,
@@ -283,6 +415,25 @@ def _read_work_patterns(r, path):
         split = r.text_list(where + ["split_into"])
         patterns.append(WorkPattern(name, tuple(words), why, tuple(split)))
     return patterns
+
+
+def _read_label_rules(r, path):
+    """A list of label suggestions: each has a label and the words that trigger it. May be empty."""
+    found, value = r.find(path)
+    if not found:
+        r.bad(path, "is missing. Add it back. Use [] for none.")
+        return []
+    if not isinstance(value, list):
+        r.bad(path, "must be a list, each with a label and words. Use [] for none.")
+        return []
+    rules = []
+    for number in range(len(value)):
+        where = path + [number]
+        r.mapping(where, ("label", "words"))
+        label = r.text(where + ["label"])
+        words = r.text_list(where + ["words"], non_empty=True)
+        rules.append(LabelRule(label, tuple(words)))
+    return rules
 
 
 def _read_type_skips(r, path):

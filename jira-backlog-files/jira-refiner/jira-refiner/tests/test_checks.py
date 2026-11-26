@@ -53,6 +53,12 @@ class DescriptionTests(unittest.TestCase):
         twenty_one = twenty + "."
         self.assertNotIn("description_short", codes(description=twenty_one))
 
+    def test_brief_descriptions_can_be_turned_off(self):
+        text = "As a dev, I want a fix, so that it works."            # under 50 characters
+        self.assertIn("description_brief", codes(description=text))
+        rules = rules_with(lambda d: d["fields"]["description"].update(brief_chars=0))
+        self.assertNotIn("description_brief", codes(rules, description=text))
+
     def test_story_format_missing_so_that(self):
         self.assertEqual(codes(description="As a platform engineer, I want a health check endpoint for the demo service."), ["description_format"])
 
@@ -68,7 +74,7 @@ class DescriptionTests(unittest.TestCase):
 
     def test_story_format_can_be_turned_off(self):
         rules = rules_with(lambda d: d["fields"]["description"]["story_format"].update(enabled=False))
-        self.assertEqual(codes(rules, description="Add a health check endpoint to the demo service."), [])
+        self.assertNotIn("description_format", codes(rules, description="Add a health check endpoint to the demo service."))
 
     def test_allowed_roles_rejects_other_roles(self):
         rules = rules_with(lambda d: d["fields"]["description"]["story_format"].update(allowed_roles=["platform engineer", "project lead"]))
@@ -95,7 +101,16 @@ class CriteriaTests(unittest.TestCase):
         self.assertNotIn("ac_short", codes(acceptance_criteria=twenty_one))
 
     def test_vague(self):
-        self.assertEqual(codes(acceptance_criteria="Works as expected and should work fine."), ["ac_vague"])
+        self.assertIn("ac_vague", codes(acceptance_criteria="Works as expected and should work fine."))
+
+    def test_brief_is_a_low_nudge_between_short_and_enough(self):
+        text = "The endpoint returns 200 when it is up"              # 38 characters: not short, but under 50
+        self.assertEqual(codes(acceptance_criteria=text), ["ac_brief"])
+        self.assertEqual(codes(acceptance_criteria=text + " and 503 when the database is down"), [])
+
+    def test_brief_can_be_turned_off(self):
+        rules = rules_with(lambda d: d["fields"]["acceptance_criteria"].update(brief_chars=0))
+        self.assertEqual(codes(rules, acceptance_criteria="The endpoint returns 200 when it is up"), [])
 
     def test_vague_phrase_inside_real_criteria_is_fine(self):
         self.assertEqual(codes(acceptance_criteria="* The endpoint returns 200 when the service is up, as expected by the pipeline"), [])
@@ -119,7 +134,8 @@ class PointsAndOtherFieldTests(unittest.TestCase):
     def test_other_required_field_empty(self):
         rules = rules_with(lambda d: d["fields"].update(other_required=["epic", "labels"]))
         found = run_checks(make_story(epic="", labels=[]), rules)
-        self.assertEqual([(f.code, f.field) for f in found], [("other_required_missing", "epic"), ("other_required_missing", "labels")])
+        mine = [(f.code, f.field) for f in found if f.code == "other_required_missing"]
+        self.assertEqual(mine, [("other_required_missing", "epic"), ("other_required_missing", "labels")])
 
     def test_other_required_field_filled(self):
         rules = rules_with(lambda d: d["fields"].update(other_required=["epic"]))

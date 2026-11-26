@@ -1,74 +1,101 @@
-# HANDOFF (started)
+# HANDOFF
 
 INTERNAL USE ONLY - Via Logic LLC.
 
-This file is for whoever finishes the project on the Fed side. It is completed in story P1-13.
-You have no memory of how this was built, so everything you need is meant to be in this repository.
+This file is for whoever finishes the project on the Fed side. You have no memory of how it was built, so everything
+you need is meant to be in this repository. Read README.md first for what the tool does.
 
-## What works today (tested on made-up data)
+**Start here:** run `python -m refiner doctor`, then work down `FED_SIDE_NEEDS.md` with a person until doctor shows no
+FAIL or TODO lines. `KICKOFF_PROMPT.md` is the prompt to give the assistant; `RUNBOOK.md` is for the people using the reports.
+**The report should run every week, the working day before team refinement.**
 
-- `rules.yaml` and its validator
-- The quality and sizing checks, verdicts, scope filtering and the command line
-- Suggestions in template mode (`python -m refiner suggest ...`) with a made-up sample context folder
-- The Excel workbook (`python -m refiner workbook ...`): Summary formulas checked against an independent count, shading, comments, Approved? dropdown
-- The Confluence report as HTML body sections with configurable markers (`python -m refiner confluence ...`), plus a manifest and a browser preview
-- 291 tests, none of which need Jira, Confluence or Harness
+## What works today (tested on made-up data, 515 tests, none need Jira, Confluence or Harness)
+
+- The rules file and its validator: every setting checked, every problem reported with its line number.
+- Per-story checks: titles, descriptions, acceptance criteria (with a "brief" tier), points, epics, labels, sizing.
+- Cross-story analysis: duplicates and related stories, finished or ended epics, best-fit epics, new-epic ideas, themes.
+- Stories planned for upload (not in Jira yet) from the snapshot's `intake` list or a CSV (`--intake`).
+- Suggestions in template mode (no AI), the change list, `changes.csv`, the HTML update pack, the workbook
+  (formulas checked against an independent count with LibreOffice), and the Confluence sections.
+- One command for a pipeline: `python -m refiner report ... --out-dir <folder>`.
+- `python -m refiner snapshot`: saved Jira exports (one file each for current sprint, upcoming sprints, backlog, epics)
+  -> the snapshot, through `jira_fields.yaml`. Handles old and new sprint formats and Agile API epic objects.
+- `python -m refiner doctor`: fails while any `REPLACE_` value is left, lists starter examples still in use, and prints a
+  counts-only snapshot shape with warnings for likely field-mapping mistakes.
+- `pipeline/`: a Harness pipeline sketch and a weekly trigger sketch, with `REPLACE_` values to align with the real examples.
 
 ## What is NOT built yet
 
-The Confluence page generator (P1-9),
-the real Jira snapshot (P1-2), the context repo step (P1-6), the pipeline (P1-10).
+| Story | What | Why not |
+| --- | --- | --- |
+| P1-1 | Probe of Jira access and the field list | Needs the real Jira |
+| P1-2 | The Jira EXPORT steps in the pipeline (the converter from export to snapshot is built) | Needs the real Jira, field IDs and the existing query pipeline |
+| P1-6 | Cloning the context repo (the program metrics repo) in the pipeline | Needs the Harness connector |
+| P1-9 | Publishing the Confluence sections | The existing publisher does this; wire it to `manifest.json` |
+| P1-10 | Turning `pipeline/*.example.yaml` into the real pipeline and weekly trigger | Needs the Fed-side pipeline examples |
+| P2-4 | A Jira-importable CSV for bulk create (dry run) | Phase 2; intake checks and duplicates are already done |
+| P3-x | The GitHub repo topic audit | Phase 3, planned in the epic doc |
 
 ## Values the Fed side supplies
 
 | Item | Goes in | Supplied by |
 | --- | --- | --- |
-| Jira base URL, auth, Harness connector | Config and pipeline YAML (P1-2, P1-10) | The example Jira query pipeline |
-| Issue type mapping for stories, spikes, others | `rules.yaml` -> `scope.issue_types` | The Fed-side mapping |
-| Field names or IDs: Acceptance Criteria, Story Points, Sprint, Epic Link, labels | Snapshot step (P1-2) | `/rest/api/2/field` output |
-| Projects, boards, sprints in scope | Config (P1-2) | The team |
-| Context repo path and Harness connector | Pipeline YAML (P1-6) | The program metrics repo |
-| Confluence template reference, version, inputs, page ID | Pipeline YAML (P1-9) | The platform team's reporting template |
-| The context repo's story-writing content, as `context/hints.yaml` plus the markdown files | `context/` folder (P1-6, P1-7) | The program metrics repo. The Fed-side assistant drafts the hints, a person confirms each one |
-| Jira address, so story keys become links | `rules.yaml` -> `workbook.jira_base_url` (empty = no links) | The Fed-side Jira setup |
-| Confluence marker syntax, and how the existing publisher takes the HTML body | `rules.yaml` -> `confluence.marker_start`, `marker_end`, `include_markers` | The existing publisher |
-| Allowed roles in "As a..." | `rules.yaml` -> `allowed_roles` (empty = any role) | Project leads |
-| Tech stack knowledge for sizing: AWS services, Harness, Nexus, Vault, OpenShift and anything else the team runs | `rules.yaml` -> `sizing.work_patterns` | Stack owners, with the Fed-side assistant drafting and a person confirming |
+| Jira base URL, auth, Harness connector | Pipeline YAML (P1-2, P1-10) | The example Jira query pipeline |
+| Jira address, so story keys become links | `rules.yaml` -> `workbook.jira_base_url` | The Fed-side Jira setup |
+| Field IDs: Acceptance Criteria, Story Points, Epic Link, Sprint, epic dates | `jira_fields.yaml` | `/rest/api/2/field` output |
+| Connectors, image, infrastructure, org and project | `pipeline/harness-pipeline.example.yaml` | The existing pipelines |
+| Refinement day, and the time zone of Harness cron | `pipeline/harness-trigger.example.yaml` | The teams and the pipeline owner |
+| The team's epics (key, name, status, start and end dates) | The snapshot's `epics` list (P1-2) | Jira, by epic query or the Agile API |
+| Issue type names for stories, spikes and others | `rules.yaml` -> `scope.issue_types` | The Fed-side mapping |
+| Projects, boards and sprints in scope | Pipeline config (P1-2) | The team |
+| The team's labels: required, allowed, suggested by words | `rules.yaml` -> `labels` | Team leads |
+| Technology names that should start titles | `rules.yaml` -> `themes.known` (starter: terraform) | Team leads |
+| Tech-stack work patterns for sizing | `rules.yaml` -> `sizing.work_patterns` | Stack owners, drafted then confirmed |
+| Allowed roles in "As a ..." | `rules.yaml` -> `allowed_roles` (empty = any) | Project leads |
+| Story-writing hints from the context repo | `context/hints.yaml` | Drafted from the program metrics repo, each confirmed by a person |
+| Confluence marker syntax and how the publisher takes the body | `rules.yaml` -> `confluence` | The existing publisher |
+| Phase 3: GitHub orgs, program topic, team topics and name patterns | `repo_rules.yaml` (not built yet) | Project leads and team leads |
 
-Nothing in the code is marked `REPLACE_` yet, because the code written so far touches no real system.
-The first `REPLACE_` values appear with the snapshot and pipeline steps.
+## The snapshot shape (what P1-2 must produce)
 
-## The snapshot shape
+A JSON file. See `fixtures/program.json` for a full made-up example.
 
-The checks read a list of stories in the shape of `refiner/model.py` (`Story`). Turning raw Jira
-JSON into that shape is the job of the snapshot step (P1-2): resolve custom field IDs by name,
-map `Sprint` to a group (`current_sprint`, `future_sprints`, `backlog`), and copy the Acceptance
-Criteria custom field into `acceptance_criteria`. See `fixtures/snapshot.json` for the target shape.
+    {
+      "stories": [ {key, summary, description, acceptance_criteria, story_points, issue_type, status,
+                    group, sprint, epic, labels, assignee, extra} ],
+      "epics":   [ {key, name, status, start_date, end_date} ],
+      "intake":  [ stories planned for upload, same fields, no key needed ]
+    }
+
+- `group` is `current_sprint`, `future_sprints` or `backlog`. Take it from which Agile API call returned the story,
+  not from parsing sprint text.
+- `epic` is the epic KEY. Copy the Acceptance Criteria custom field into `acceptance_criteria`.
+- `extra` is every other Jira field as name -> text, for the Raw Jira data tab.
+- Dates are `YYYY-MM-DD`. Keep the snapshot's text as Jira gives it (wiki markup is handled).
+
+## Tuning the cross-story rules (expect to do this on the first real run)
+
+- **Epic matching** uses only the epic's NAME. One shared word of a two-word name scores 50%, which is the default
+  `epics.min_match_score`. Raise it if suggestions are too eager; give epics short, clear names for better matches.
+- **Duplicates**: `duplicate_at` (0.8) and `related_at` (0.5). Look at the Duplicates tab and adjust.
+- **Themes**: only `themes.known` rewrite titles. Counted words are listed, never applied. Add a word to `known`
+  once a person agrees it should start titles.
+- **Word matching** is deliberately simple (it cuts common word endings). It is the same everywhere, which is what matters.
+- **Everyday words** in `suggestions.ignore_when_matching` are ignored when comparing stories. Do not add topic words
+  like "encrypt" or "migrate" there.
 
 ## About the work patterns (important)
 
-`sizing.work_patterns` in `rules.yaml` is a **starter list of examples, not a rule**. Each pattern is a kind
-of work that sounds small but usually is not, with the words that trigger it, why it is bigger, and how it
-usually splits. The four starters (encrypt an existing database, upgrade a database, upgrade a cluster,
-migrate data or a workload) come from general AWS knowledge and nothing more. The real value is a list that
-matches the team's actual stack. When you extend it: draft patterns from the real stack, show each one to a
-person to confirm, and never present a pattern as fact. A pattern only prompts a second look; it does not
-decide that a story is wrong. The suggestions story (P1-7) will reuse `why_bigger` and `split_into`.
+`sizing.work_patterns` in `rules.yaml` is a **starter list of examples, not a rule**. The four starters come from
+general AWS knowledge only. Draft patterns from the real stack, show each to a person to confirm, and never present a
+pattern as fact. A pattern only prompts a second look.
 
 ## About suggestions and hints (important)
 
 - Suggestions are drafts. They must never add scope: words come from the story, a confirmed hint, or a work pattern.
-- Acceptance criteria are suggested **only** from `hints.yaml`. If you cannot confirm a hint with a person, leave it out. A missing hint is safe (it becomes a question); a wrong hint is not.
-- Draft hints from the real context repo, keep each short and plain, and mark none as final until a person has read it.
-- `suggestions.ignore_when_matching` in `rules.yaml` lists everyday words ignored when finding related stories. `suggestions.action_verbs` only decides how "I want to ..." is worded. Do not merge the two lists.
+- Acceptance criteria are suggested **only** from `hints.yaml`. A missing hint is safe (it becomes a question); a wrong one is not.
+- A suggested title uses only words from the story's own description.
 - Template mode is the only mode. An AI-assisted mode needs an approved endpoint (not known yet) and a data-handling check first.
-
-## About the workbook
-
-- The Summary tab must stay formulas. If you add a column to Findings, update `_FINDINGS_TITLES` and the widths together in `refiner/workbook.py`; the Summary formulas find their columns by name.
-- The raw tab expects `Story.extra` (a name -> text dictionary of every other Jira field). The snapshot step (P1-2) must fill it, flattening each field to text. Do not put credentials or personal data in it that is not already in Jira.
-- To check formulas after a change: `python3 /path/to/recalc.py report.xlsx` (LibreOffice) and compare with the Python counts in `refiner/measures.py`. LibreOffice is only needed for this check, not to build the file.
-- Keep text safe: always write cell text through `_text()` in `workbook.py`. It keeps text starting with `=` as text and removes characters Excel cannot hold.
 
 ## Compare with the existing publisher and workbook pipeline (do this before wiring)
 
@@ -95,4 +122,7 @@ Compare them against this code, adjust the settings or the code, and note every 
 
 - The pipeline must stay read-only. Never add code that creates or edits Jira issues.
 - No real Jira text, secrets or CUI in this repository, in logs, or in test fixtures.
+- Keep one job per module. A new kind of check goes in its own module, is called from `checks.py` (one story) or
+  `analysis.py` (across stories), and gets its own test file.
 - Add a test for every change. Run: `python3 -m unittest discover -s tests -t .`
+- Write workbook cell text through `_text()` in `workbook.py`, and HTML text through `esc()`.

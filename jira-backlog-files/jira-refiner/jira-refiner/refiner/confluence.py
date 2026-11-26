@@ -4,6 +4,8 @@ The existing publisher takes an HTML body and replaces whatever sits between a s
 end marker. A page can hold several such sections, so the report is written as SEPARATE sections:
 
     refiner-summary      the header, "at a glance", the by-group table and how to read it
+    refiner-epics        the by-epic table and epic coverage (every story should have a current or future epic)
+    refiner-themes       words that show up in several titles, and whether titles start with them
     refiner-labels       the by-label table
     refiner-not-checked  what was in the snapshot but not checked
 
@@ -20,7 +22,7 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 
-from .measures import GROUP_TITLES, MEASURES, VERDICT_COLUMNS, count_by_group, count_by_label, count_row
+from .measures import GROUP_TITLES, MEASURES, NO_EPIC, VERDICT_COLUMNS, count_by_epic, count_by_group, count_by_label, count_row
 
 COLUMNS = ["Stories"] + [title for title, _ in MEASURES] + list(VERDICT_COLUMNS)
 
@@ -29,6 +31,7 @@ GRAY, AMBER, RED, GREEN = "rgb(137,137,137)", "rgb(180,95,6)", "rgb(191,38,0)", 
 _ATTENTION = {
     "Not pointed": AMBER, "Description needs update": AMBER, "Acceptance criteria needs update": AMBER,
     "Needs review": AMBER, "Missing info": RED, "Suggest split": RED, "Looks good": GREEN,
+    "Epic needs attention": RED, "Possible duplicate": RED, "Title needs attention": AMBER, "Labels need attention": AMBER,
 }
 
 
@@ -58,6 +61,8 @@ def build_sections(summary, rules, generated=None):
     ids = rules.confluence_section_ids
     return [
         Section(ids["summary"], "Summary", _summary_html(summary, rules, generated)),
+        Section(ids["epics"], "By epic", _epics_html(summary)),
+        Section(ids["themes"], "Themes", _themes_html(summary)),
         Section(ids["labels"], "By label", _labels_html(summary)),
         Section(ids["not_checked"], "Not checked", _not_checked_html(summary)),
     ]
@@ -79,7 +84,7 @@ def _cell(column, value, bold=False):
     return f'<td style="text-align: right;">{text}</td>'
 
 
-def _count_table(first_title, rows, total=None):
+def count_table(first_title, rows, total=None):
     """A table of count rows. `rows` is {name: count row}; `total` is an optional last, bold row."""
     head = "".join(f'<th style="text-align: right;">{esc(t)}</th>' if i else f"<th>{esc(t)}</th>"
                    for i, t in enumerate([first_title] + COLUMNS))
@@ -104,6 +109,10 @@ def _summary_html(summary, rules, generated):
         ("Acceptance criteria needs update", f"the acceptance criteria are empty, {rules.ac_min_chars - 1} characters or fewer, or only vague words."),
         ("Suggest split", f"the story looks bigger than its points: {rules.review_at_or_above:g} points or more with little written, "
                           f"or {rules.max_points_before_keyword_review:g} points or fewer for a kind of work that usually takes longer."),
+        ("Epic needs attention", "the story has no epic, or its epic has finished or ended."),
+        ("Possible duplicate", "the title (and description) are very close to another story's."),
+        ("Title needs attention", "the title is missing, short, long, or does not fit the description."),
+        ("Labels need attention", "a required label is missing, a label is not allowed, or the text suggests a label."),
         ("Missing info", "something required is empty (and the story is not a split suggestion)."),
         ("Needs review", "something is short, vague or off, but nothing is missing."),
         ("Looks good", "no findings."),
@@ -116,8 +125,9 @@ def _summary_html(summary, rules, generated):
         f"<p>Generated {esc(generated)}. Rules version {esc(rules.version)}. "
         f"{esc(total['Stories'])} stories and spikes checked ({esc(', '.join(GROUP_TITLES[g] for g in rules.include_groups))}; statuses ignored: {esc(ignore)}).</p>",
         f"<p><strong>At a glance:</strong> {esc(glance)}.</p>",
+        *([f"<p><em>{esc(rules.schedule_note)}</em></p>"] if rules.schedule_note else []),
         "<h3>By group</h3>",
-        _count_table("Group", groups, total),
+        count_table("Group", groups, total),
         "<h3>What the columns mean</h3>",
         f"<ul>{items}</ul>",
         "<p>Each story is counted once per row. The first three measure columns can overlap (a story can be both unpointed and "
@@ -129,6 +139,36 @@ def _summary_html(summary, rules, generated):
     return "\n".join(parts)
 
 
+def _epics_html(summary):
+    epics = count_by_epic(summary.results, summary.analysis.epics)
+    rows = {(f"{key} {name}".strip() if name else key): counts for key, (name, counts) in epics.items()}
+    without = epics[NO_EPIC][1]["Stories"]
+    coverage = ("Every story has an epic." if without == 0
+                else f"{without} {'story has' if without == 1 else 'stories have'} no epic. The goal is none.")
+    parts = [
+        "<h3>By epic</h3>",
+        f"<p>{esc(coverage)} Epics that have finished or ended are marked in the Epic needs attention column.</p>",
+        count_table("Epic", rows),
+    ]
+    return "\n".join(parts)
+
+
+def _themes_html(summary):
+    themes = summary.analysis.themes
+    if not themes:
+        return "<h3>Themes</h3>\n<p>No themes were found.</p>"
+    rows = "".join(
+        f"<tr><td>{esc(t.word)}</td><td>{'Listed in the rules file' if t.known else 'Found by counting'}</td>"
+        f'<td style="text-align: right;">{esc(len(t.keys))}</td><td style="text-align: right;">{esc(len(t.starting))}</td></tr>'
+        for t in themes)
+    return "\n".join([
+        "<h3>Themes</h3>",
+        "<p>Words that show up in several titles. Titles that start with the same word sort together.</p>",
+        '<table><tbody><tr><th>Theme</th><th>Where from</th><th style="text-align: right;">Titles</th>'
+        f'<th style="text-align: right;">Start with it</th></tr>{rows}</tbody></table>',
+    ])
+
+
 def _labels_html(summary):
     labels = count_by_label(summary.results)
     if not labels:
@@ -137,7 +177,7 @@ def _labels_html(summary):
         "<h3>By label</h3>",
         "<p>A story with several labels is counted under each of them, so these rows can add up to more than the total. "
         "Stories with no label are under &quot;No label&quot;.</p>",
-        _count_table("Label", labels),
+        count_table("Label", labels),
     ])
 
 

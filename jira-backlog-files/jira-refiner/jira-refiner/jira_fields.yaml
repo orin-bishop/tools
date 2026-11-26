@@ -1,0 +1,23 @@
+# jira_fields.yaml - how to read a Jira Data Center export. FILL THIS IN ON THE FED SIDE.
+#
+# Find the field IDs with:  GET <jira>/rest/api/2/field
+# Only each field's "id" and "name" are needed. Standard fields (summary, description, status, issuetype,
+# labels, assignee) need no setting. Run  python -m refiner doctor  to see which values are still placeholders.
+fields_version: 1
+
+story_fields:
+  acceptance_criteria: REPLACE_ACCEPTANCE_CRITERIA_FIELD_ID   # for example customfield_12345
+  story_points: REPLACE_STORY_POINTS_FIELD_ID                 # for example customfield_10002
+  epic_link: REPLACE_EPIC_LINK_FIELD_ID                       # for example customfield_10008 (Agile API exports may carry "epic" instead; both work)
+  sprint: REPLACE_SPRINT_FIELD_ID                             # for example customfield_10004
+
+epic_fields:
+  name: summary          # "summary", or the id of the Epic Name field
+  start_date: ""         # the id of a field holding the epic's start date (for example a Target start field), or "" if none
+  end_date: duedate      # the id of a field holding the epic's end date ("duedate" is Jira's own due date), or ""
+
+# Other Jira fields to keep for the "Raw Jira data" tab:
+#   all   every other field
+#   []    none
+#   [customfield_10500, priority]   only these
+extra_fields: all

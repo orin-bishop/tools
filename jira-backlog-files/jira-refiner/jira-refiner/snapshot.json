@@ -1,0 +1,49 @@
+{
+  "note": "Built by python -m refiner snapshot from Jira exports.",
+  "stories": [
+    {
+      "key": "J-1",
+      "summary": "Add health check to demo service",
+      "description": "As a platform engineer, I want a health check endpoint on the demo service, so that the pipeline can confirm it is up.",
+      "acceptance_criteria": "",
+      "story_points": null,
+      "issue_type": "Story",
+      "status": "In Progress",
+      "group": "current_sprint",
+      "sprint": "",
+      "epic": "",
+      "labels": [
+        "platform"
+      ],
+      "assignee": "Sample Person A",
+      "extra": {
+        "Components": "Platform",
+        "Acceptance Criteria": "* Returns 200 when the service is up\n* Returns 503 when the database is down",
+        "Story Points": "2",
+        "Epic Link": "JE-1",
+        "Sprint": "com.atlassian.greenhopper.service.sprint.Sprint@1a2b[id=12,rapidViewId=3,state=ACTIVE,name=Sprint 12,startDate=2026-11-16]",
+        "Priority": "Medium"
+      }
+    },
+    {
+      "key": "J-2",
+      "summary": "Rotate demo API keys",
+      "description": "h3. Why\n*As a* platform engineer, I want the demo API keys rotated, so that old keys stop working.",
+      "acceptance_criteria": "",
+      "story_points": null,
+      "issue_type": "Story",
+      "status": "To Do",
+      "group": "current_sprint",
+      "sprint": "",
+      "epic": "",
+      "labels": [],
+      "assignee": "Sample Person A",
+      "extra": {
+        "Components": "Platform",
+        "Sprint": "Sprint 12",
+        "Priority": "Medium"
+      }
+    }
+  ],
+  "epics": []
+}

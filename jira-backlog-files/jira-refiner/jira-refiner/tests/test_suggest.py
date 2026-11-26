@@ -143,8 +143,8 @@ class QuestionTests(unittest.TestCase):
         self.assertIn("(1 point = 2 days)", " ".join(one(rules, story_points=None).questions))
 
     def test_summary_questions(self):
-        self.assertIn("What should the summary say? One short line that names the work.", one(summary="").questions)
-        self.assertIn("Can the summary say a little more about the work?", one(summary="Fix it").questions)
+        self.assertIn("What should the summary say? One short line that names the work.", one(summary="", description="").questions)
+        self.assertIn("Can the summary say a little more about the work?", one(summary="Fix it", description="").questions)
         self.assertIn("The summary and the description may describe different work. Which one is right?",
                       one(summary="Rotate service account credentials").questions)
 
@@ -213,7 +213,8 @@ class SplitTests(unittest.TestCase):
 
 class SelectionTests(unittest.TestCase):
     def test_looks_good_stories_get_nothing(self):
-        good, thin = make_story(key="G-1"), make_story(key="B-1", description="")
+        good = make_story(key="G-1")
+        thin = make_story(key="B-1", summary="Rotate service credentials monthly", description="")     # a different title: not a duplicate
         self.assertEqual(list(run([good, thin])), ["B-1"])
 
     def test_every_suggestion_is_labelled_and_says_where_it_came_from(self):
@@ -225,7 +226,8 @@ class SelectionTests(unittest.TestCase):
         data = to_dict(one(summary="Encrypt production database"))
         json.dumps(data)                                      # must be JSON-safe
         self.assertEqual(set(data), {"key", "verdict", "label", "description", "needs_confirmation", "acceptance_criteria",
-                                      "questions", "split_reason", "split_titles", "related", "references", "basis"})
+                                      "questions", "split_reason", "split_titles", "title", "epic_options", "new_epic",
+                                      "labels", "duplicates", "related", "references", "basis"})
 
     def test_same_input_gives_the_same_output(self):
         stories = [make_story(key="A", description=""), make_story(key="B", acceptance_criteria="")]
@@ -239,7 +241,7 @@ class RelatedTests(unittest.TestCase):
                 description="As a platform engineer, I want a dashboard of deploy frequency by team, so that we can see how often each team ships.")
 
     def related(self, rules=None, **flagged):
-        base = dict(key="F-1", epic="E1", summary="Build deploy frequency dashboard", description="", story_points=2)
+        base = dict(key="F-1", epic="E1", summary="Deploy frequency report for leadership", description="", story_points=2)
         base.update(flagged)
         results = run([make_story(**self.GOOD), make_story(**base)], rules)
         return results["F-1"].related
@@ -294,6 +296,106 @@ class ReferenceTests(unittest.TestCase):
     def test_can_be_turned_off(self):
         rules = rules_with(lambda d: d["suggestions"].update(max_context_references=0))
         self.assertEqual(one(rules, self.CONTEXT, summary="Encrypt production database").references, [])
+
+
+# ---------------------------------------------------------------------------------------------------
+# Titles, epics, labels and duplicates
+# ---------------------------------------------------------------------------------------------------
+from datetime import date
+
+from refiner.model import Epic
+
+TODAY = date(2026, 11, 25)
+EPICS = [Epic.from_dict(dict(key="E-1", name="Terraform migration", status="In Progress")),
+         Epic.from_dict(dict(key="E-2", name="Legacy cleanup", status="Done"))]
+
+
+def run_full(stories, rules=None, epics=EPICS, context=None):
+    """Check, analyse and suggest, the way the command line does."""
+    rules = rules or rules_with()
+    summary = check_all(stories, rules, epics, today=TODAY)
+    return suggest_all(summary.results, rules, context, summary.analysis)
+
+
+class TitleSuggestionTests(unittest.TestCase):
+    DESCRIPTION = "As a platform engineer, I want to rotate the shared database credentials every 90 days, so that old ones stop working."
+
+    def test_a_title_that_does_not_fit_gets_a_suggestion_from_the_description(self):
+        s = run_full([make_story(key="T-1", summary="Misc fixes and cleanup", description=self.DESCRIPTION)])["T-1"]
+        self.assertEqual(s.title, "Rotate the shared database credentials every 90 days")
+        self.assertIn("title: drafted from the description", s.basis)
+
+    def test_a_missing_title_gets_a_suggestion_and_no_question(self):
+        s = run_full([make_story(key="T-1", summary="", description=self.DESCRIPTION)])["T-1"]
+        self.assertTrue(s.title)
+        self.assertFalse(any(q.startswith("What should the summary say") for q in s.questions))
+
+    def test_a_long_title_gets_a_shorter_one(self):
+        long_title = "Rotate the shared database credentials " + "and more " * 12
+        s = run_full([make_story(key="T-1", summary=long_title, description=self.DESCRIPTION)])["T-1"]
+        self.assertTrue(s.title)
+        self.assertLessEqual(len(s.title), 90)
+
+    def test_no_suggestion_when_the_title_is_fine_or_suggestions_are_off(self):
+        self.assertEqual(run_full([make_story(key="T-1", description="")])["T-1"].title, "")          # flagged for something else
+        rules = rules_with(lambda d: d["titles"].update(suggest=False))
+        s = run_full([make_story(key="T-1", summary="Misc fixes and cleanup", description=self.DESCRIPTION)], rules)["T-1"]
+        self.assertEqual(s.title, "")
+        self.assertIn("The summary and the description may describe different work. Which one is right?", s.questions)
+
+
+class EpicSuggestionTests(unittest.TestCase):
+    def test_a_story_with_no_epic_gets_the_best_current_epic(self):
+        s = run_full([make_story(key="E-9", summary="Terraform module for VPC", epic="")])["E-9"]
+        self.assertEqual(s.epic_options, [("E-1", "Terraform migration", 0.5)])
+        self.assertFalse(any("Which epic" in q for q in s.questions))
+
+    def test_a_story_in_a_finished_epic_is_pointed_to_a_current_one(self):
+        s = run_full([make_story(key="E-9", summary="Terraform module for VPC", epic="E-2")])["E-9"]
+        self.assertEqual(s.epic_options[0][0], "E-1")
+
+    def test_finished_epics_are_never_suggested(self):
+        s = run_full([make_story(key="E-9", summary="Legacy cleanup of old scripts", epic="")])["E-9"]
+        self.assertEqual(s.epic_options, [])
+
+    def test_stories_that_fit_no_epic_but_share_a_word_get_a_new_epic_idea(self):
+        stories = [make_story(key=f"C-{i}", summary=f"Rotate {x} credentials", description="", epic="")
+                   for i, x in enumerate(("service", "cloud", "API"), start=1)]
+        found = run_full(stories)
+        self.assertEqual(found["C-1"].new_epic, 'Create an epic "Credentials" for this story and C-2, C-3')
+        self.assertEqual(found["C-3"].new_epic, 'Create an epic "Credentials" for this story and C-1, C-2')
+        self.assertEqual(found["C-1"].epic_options, [])
+
+    def test_a_lone_story_that_fits_nothing_gets_a_question(self):
+        s = run_full([make_story(key="E-9", summary="Update the onboarding page", epic="")])["E-9"]
+        self.assertIn("Which current or future epic does this story belong to? No existing epic fits well.", s.questions)
+
+    def test_without_the_analysis_a_plain_question_is_asked(self):
+        rules = rules_with()
+        summary = check_all([make_story(key="E-9", summary="Terraform module", epic="")], rules, EPICS, today=TODAY)
+        s = suggest_all(summary.results, rules)["E-9"]                       # no analysis passed
+        self.assertEqual(s.epic_options, [])
+        self.assertIn("Which current or future epic does this story belong to?", s.questions)
+
+
+class LabelAndDuplicateSuggestionTests(unittest.TestCase):
+    def test_missing_required_and_suggested_labels_are_listed(self):
+        rules = rules_with(lambda d: d["labels"].update(required_all=["team-save"], suggest=[{"label": "terraform", "words": ["terraform"]}]))
+        s = run_full([make_story(key="L-1", summary="Terraform module for VPC", labels=[])], rules)["L-1"]
+        self.assertEqual(s.labels, ["team-save", "terraform"])
+        self.assertIn("labels: the rules file", s.basis)
+
+    def test_duplicates_name_the_other_story_and_ask_the_question(self):
+        stories = [make_story(key="D-1", summary="Rotate service credentials"), make_story(key="D-2", summary="Service credentials rotate")]
+        found = run_full(stories)
+        self.assertEqual(found["D-1"].duplicates, [("D-2", "Service credentials rotate", 1.0)])
+        self.assertIn("Is this a duplicate of D-2? If so, close or merge one of them.", found["D-1"].questions)
+
+    def test_a_description_that_is_already_in_story_form_is_not_suggested_again(self):
+        text = "As a platform engineer, I want a new build tool, so that builds are faster."          # 71 characters
+        rules = rules_with(lambda d: d["fields"]["description"].update(brief_chars=100))                 # flagged brief
+        s = run_full([make_story(key="B-1", summary="Set up new build tool", description=text)], rules)["B-1"]
+        self.assertEqual(s.description, "")
 
 
 class FixtureTests(unittest.TestCase):

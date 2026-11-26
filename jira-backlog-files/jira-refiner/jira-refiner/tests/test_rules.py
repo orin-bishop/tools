@@ -27,7 +27,7 @@ class GoodFileTests(unittest.TestCase):
     def test_real_rules_file_loads(self):
         rules = load_rules(RULES_PATH)
         self.assertEqual(rules.version, 1)
-        self.assertEqual(rules.include_groups, ("current_sprint", "future_sprints", "backlog"))
+        self.assertEqual(rules.include_groups, ("current_sprint", "future_sprints", "backlog", "intake"))
         self.assertEqual(rules.issue_types, ("Story", "Spike"))
         self.assertEqual(rules.description_min_chars, 21)
         self.assertEqual(rules.review_at_or_above, 5.0)
@@ -76,7 +76,7 @@ class ProblemTests(unittest.TestCase):
         self.assertTrue(any("not a valid pattern" in p for p in found), found)
 
     def test_wrong_group_name(self):
-        found = problems_for(TEXT.replace("include: [current_sprint, future_sprints, backlog]", "include: [current_sprint, someday]"))
+        found = problems_for(TEXT.replace("include: [current_sprint, future_sprints, backlog, intake]", "include: [current_sprint, someday]"))
         self.assertTrue(any("someday" in p and "not allowed" in p for p in found), found)
 
     def test_true_false_check(self):
@@ -84,7 +84,7 @@ class ProblemTests(unittest.TestCase):
         self.assertTrue(any("true or false" in p for p in found), found)
 
     def test_bad_yaml_gives_one_message_with_a_line(self):
-        found = problems_for(TEXT.replace("include: [current_sprint, future_sprints, backlog]", "include: [current_sprint, future_sprints"))
+        found = problems_for(TEXT.replace("include: [current_sprint, future_sprints, backlog, intake]", "include: [current_sprint, future_sprints"))
         self.assertEqual(len(found), 1)
         self.assertIn("not valid YAML", found[0])
         self.assertIn("line", found[0])

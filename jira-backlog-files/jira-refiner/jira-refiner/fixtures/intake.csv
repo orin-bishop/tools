@@ -1,0 +1,4 @@
+Title,Description,Acceptance criteria,Story points,Labels,Epic,Issue type
+Add alert for failed deployments,"As a platform engineer, I want an alert when a deployment fails, so that someone hears about it.","* An alert is sent\n* It names the service",2,"team-save; alerts",EPIC-2,Story
+Look into cheaper log storage,,,3,,,Spike
+,,,,,,

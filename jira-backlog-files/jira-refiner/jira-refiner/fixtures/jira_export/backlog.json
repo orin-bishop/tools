@@ -1,0 +1,66 @@
+[
+  {
+    "issues": [
+      {
+        "key": "J-4",
+        "fields": {
+          "summary": "Add Terraform state backend",
+          "description": "",
+          "customfield_10100": null,
+          "customfield_10101": "5",
+          "customfield_10102": null,
+          "customfield_10103": null,
+          "labels": [],
+          "issuetype": {
+            "name": "Story"
+          },
+          "status": {
+            "name": "Backlog"
+          },
+          "assignee": {
+            "displayName": "Sample Person A",
+            "name": "sample.a"
+          },
+          "priority": {
+            "name": "Medium"
+          },
+          "components": [
+            {
+              "name": "Platform"
+            }
+          ]
+        }
+      },
+      {
+        "key": "J-1",
+        "fields": {
+          "summary": "Add health check to demo service",
+          "description": "duplicate copy in the backlog file",
+          "customfield_10100": null,
+          "customfield_10101": 2.0,
+          "customfield_10102": "JE-1",
+          "customfield_10103": null,
+          "labels": [],
+          "issuetype": {
+            "name": "Story"
+          },
+          "status": {
+            "name": "To Do"
+          },
+          "assignee": {
+            "displayName": "Sample Person A",
+            "name": "sample.a"
+          },
+          "priority": {
+            "name": "Medium"
+          },
+          "components": [
+            {
+              "name": "Platform"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

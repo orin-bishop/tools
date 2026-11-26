@@ -6,6 +6,8 @@ For every story that is not "Looks good" this builds a draft a person can accept
   * "Ask in refinement" questions
   * a split suggestion (titles only) when the story looks bigger than its points
   * pointers to well-written related stories and to related context-file sections
+  * a better title (drafted from the description), a best-fit epic or a new-epic idea, labels to add,
+    and the stories it may duplicate
 
 The guardrails, in code:
   * NO ADDED SCOPE. Words come from the story itself, a confirmed hint, or a work pattern.
@@ -17,13 +19,16 @@ The guardrails, in code:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .context import ContextIndex, find_hint, find_sections
-from .measures import CRITERIA_CODES, DESCRIPTION_CODES
+from .labels import labels_to_add
+from .measures import CRITERIA_CODES, DESCRIPTION_CODES, EPIC_CODES, LABEL_CODES, TITLE_CODES
 from .sizing import find_work_patterns
 from .storyform import reason_in, role_in, want_in, without_role
-from .text import plain_text, stem, words
+from .text import natural_key, plain_text, topic_words
+from .titles import suggest_title
 from .verdict import LOOKS_GOOD, SPLIT_CODES
 
 LABEL = "SUGGESTED - review before use"
@@ -41,6 +46,11 @@ class Suggestion:
     questions: list = field(default_factory=list)           # "Ask in refinement"
     split_titles: list = field(default_factory=list)
     split_reason: str = ""
+    title: str = ""                                         # a better title, '' if the current one is fine
+    epic_options: list = field(default_factory=list)        # [(epic key, epic name, score)] best first
+    new_epic: str = ""                                      # "Create epic 'X' for A, B, C" when no epic fits
+    labels: list = field(default_factory=list)              # labels to add
+    duplicates: list = field(default_factory=list)          # [(other key, other title, score)]
     related: list = field(default_factory=list)             # [(key, summary)] of well-written stories
     references: list = field(default_factory=list)          # ["file > heading"] of context sections
     basis: list = field(default_factory=list)               # where each part came from
@@ -48,18 +58,21 @@ class Suggestion:
     label: str = LABEL
 
 
-def suggest_all(results, rules, context=None):
-    """Return {story key: Suggestion} for every story whose verdict is not 'Looks good'."""
+def suggest_all(results, rules, context=None, analysis=None):
+    """Return {story key: Suggestion} for every story whose verdict is not 'Looks good'.
+
+    `analysis` (from analysis.analyze) supplies the cross-story facts: epic matches, new-epic ideas and duplicates.
+    """
     context = context or ContextIndex()
     well_written = [r.story for r in results if r.verdict == LOOKS_GOOD]
     return {
-        r.story.key: suggest_for(r, rules, context, well_written)
+        r.story.key: suggest_for(r, rules, context, well_written, analysis)
         for r in results
         if r.verdict != LOOKS_GOOD
     }
 
 
-def suggest_for(result, rules, context, well_written=()):
+def suggest_for(result, rules, context, well_written=(), analysis=None):
     story = result.story
     codes = {f.code for f in result.flags}
     summary = plain_text(story.summary)
@@ -74,13 +87,15 @@ def suggest_for(result, rules, context, well_written=()):
     # --- description -----------------------------------------------------------------------------
     if codes & DESCRIPTION_CODES:
         line, placeholder = _description(summary, description, hint, rules)
-        if line:
+        if line and _squash(line) == _squash(description):
+            line = ""                                           # nothing to change: the story is already in this form
+        elif line:
             suggestion.description = line
             suggestion.needs_confirmation = placeholder
             suggestion.basis.append("description: the story's own summary and description")
             if placeholder:
                 questions.append("Why does this matter? The answer fills the 'so that' part of the story.")
-        else:
+        elif not description:
             questions.append("What is this story about? Add a short summary and a sentence or two of description.")
 
     # --- acceptance criteria ---------------------------------------------------------------------
@@ -94,18 +109,41 @@ def suggest_for(result, rules, context, well_written=()):
     if hint and codes & (DESCRIPTION_CODES | CRITERIA_CODES):
         questions.extend(hint.questions)
 
+    # --- title -----------------------------------------------------------------------------------
+    title_flagged = bool(codes & TITLE_CODES)
+    if title_flagged and rules.title_suggest:
+        suggestion.title = suggest_title(summary, description, rules)
+        if suggestion.title:
+            suggestion.basis.append("title: drafted from the description")
+
+    # --- epic ------------------------------------------------------------------------------------
+    if codes & EPIC_CODES and analysis is not None:
+        _epic(suggestion, story, analysis, questions)
+    elif codes & EPIC_CODES:
+        questions.append("Which current or future epic does this story belong to?")
+
+    # --- labels ----------------------------------------------------------------------------------
+    if codes & LABEL_CODES:
+        suggestion.labels = labels_to_add(story, rules)
+        if suggestion.labels:
+            suggestion.basis.append("labels: the rules file")
+
+    # --- duplicates ------------------------------------------------------------------------------
+    if "duplicate_story" in codes and analysis is not None:
+        _duplicates(suggestion, story, analysis, questions)
+
     # --- other findings become questions ---------------------------------------------------------
     if "points_missing" in codes:
         questions.append(f"How many days of work is this? Most stories here are {rules.typical_points:g} points "
                          f"(1 point = {_days(rules.points_equal_days)}).")
-    if "summary_missing" in codes:
+    if "summary_missing" in codes and not suggestion.title:
         questions.append("What should the summary say? One short line that names the work.")
-    if "summary_short" in codes:
+    if "summary_short" in codes and not suggestion.title:
         questions.append("Can the summary say a little more about the work?")
     if "summary_mismatch" in codes:
         questions.append("The summary and the description may describe different work. Which one is right?")
     for flag in result.flags:
-        if flag.code == "other_required_missing":
+        if flag.code == "other_required_missing" and not (flag.field == "epic" and suggestion.epic_options):
             questions.append(f"Which {flag.field} does this story belong to?")
 
     # --- split advice ----------------------------------------------------------------------------
@@ -158,11 +196,45 @@ def _description(summary, description, hint, rules):
     return line, placeholder
 
 
+def _squash(text):
+    """Text with capitals, punctuation and spacing ignored, to tell whether two texts really differ."""
+    return re.sub(r"[^a-z0-9]+", " ", str(text).lower()).strip()
+
+
+def _epic(suggestion, story, analysis, questions):
+    matches = analysis.epic_matches.get(story.key, [])
+    if matches:
+        suggestion.epic_options = [(m.epic.key, m.epic.name, m.score) for m in matches]
+        suggestion.basis.append("epic: how much of the epic's name appears in the story")
+        return
+    for proposal in analysis.new_epics:
+        if story.key in proposal.keys:
+            others = [k for k in proposal.keys if k != story.key]
+            suggestion.new_epic = f"Create an epic \"{proposal.name}\" for this story" + (f" and {', '.join(others)}" if others else "")
+            suggestion.basis.append("epic: stories that share a word and fit no current epic")
+            return
+    questions.append("Which current or future epic does this story belong to? No existing epic fits well.")
+
+
+def _duplicates(suggestion, story, analysis, questions):
+    for pair in analysis.pairs:
+        if pair.kind != "duplicate" or story.key not in (pair.a.key, pair.b.key):
+            continue
+        other = pair.b if pair.a.key == story.key else pair.a
+        suggestion.duplicates.append((other.key, plain_text(other.summary), pair.score))
+    suggestion.duplicates.sort(key=lambda item: (-item[2], natural_key(item[0])))
+    if suggestion.duplicates:
+        suggestion.basis.append("duplicates: how alike the titles (and descriptions) are")
+        questions.append(f"Is this a duplicate of {suggestion.duplicates[0][0]}? If so, close or merge one of them.")
+
+
 def _want_from_summary(summary, rules):
     text = summary.strip().rstrip(".")
     first = text.split()[0] if text.split() else ""
-    # Lower-case the first letter unless it starts an acronym such as "API" or "RDS".
-    lowered = text if (len(first) > 1 and first[1].isupper()) else text[:1].lower() + text[1:]
+    # Lower-case the first letter, except for an acronym such as "API" or "RDS" and for a known technology name
+    # from the rules file (such as "Terraform"), which keep their capitals.
+    keep = (len(first) > 1 and first[1].isupper()) or first.lower() in {w.lower() for w in rules.themes_known}
+    lowered = text if keep else text[:1].lower() + text[1:]
     return f"to {lowered}" if first.lower() in rules.suggest_action_verbs else lowered
 
 
@@ -203,10 +275,8 @@ def _related(story, summary, description, well_written, rules):
 
 
 def _topic_words(text, rules):
-    """The words that say what a story is ABOUT: no filler, no role words, and none of the everyday words in
-    the rules file's ignore_when_matching list (every story has those, so they make unrelated stories look alike)."""
-    ignored = {stem(w) for w in rules.suggest_ignore_words}
-    return {w for w in words(text) if w not in ignored}
+    """Topic words for a story, ignoring the everyday words in the rules file (see text.topic_words)."""
+    return topic_words(text, rules.suggest_ignore_words)
 
 
 def _days(count):
@@ -234,6 +304,11 @@ def to_dict(suggestion):
         "questions": suggestion.questions,
         "split_reason": suggestion.split_reason,
         "split_titles": suggestion.split_titles,
+        "title": suggestion.title,
+        "epic_options": [{"key": k, "name": n, "score": round(sc, 2)} for k, n, sc in suggestion.epic_options],
+        "new_epic": suggestion.new_epic,
+        "labels": suggestion.labels,
+        "duplicates": [{"key": k, "title": t, "score": round(sc, 2)} for k, t, sc in suggestion.duplicates],
         "related": [{"key": k, "summary": s} for k, s in suggestion.related],
         "references": suggestion.references,
         "basis": suggestion.basis,

@@ -47,6 +47,16 @@ class StemTests(unittest.TestCase):
             self.assertEqual(stem(word), "encrypt", word)
         self.assertEqual(stem("database"), stem("databases"))
 
+    def test_doubled_letters_from_an_ending_are_dropped(self):
+        self.assertEqual(stem("logging"), stem("log"))
+        self.assertEqual(stem("shipped"), stem("ship"))
+        self.assertEqual(stem("mapping"), stem("map"))
+
+    def test_words_that_really_end_in_a_double_letter_keep_it(self):
+        self.assertEqual(stem("installing"), "install")
+        self.assertEqual(stem("passed"), "pass")
+        self.assertEqual(stem("adding"), stem("add"))
+
     def test_short_words_are_left_alone(self):
         self.assertEqual(stem("use"), "use")
         self.assertEqual(stem("is"), "is")

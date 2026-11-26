@@ -11,10 +11,18 @@
 rules_version: 1
 
 # ---------------------------------------------------------------------------
+# When the report runs. It should run EVERY WEEK, before the team's refinement meeting, so leads and
+# engineers walk in knowing what needs work. The schedule itself is set in the Harness trigger
+# (see pipeline/harness-trigger.example.yaml). This note is printed on the reports so readers know.
+# ---------------------------------------------------------------------------
+schedule:
+  note: "This report runs every week, the working day before team refinement."
+
+# ---------------------------------------------------------------------------
 # Which stories get checked.
 # ---------------------------------------------------------------------------
 scope:
-  include: [current_sprint, future_sprints, backlog]   # any of these three
+  include: [current_sprint, future_sprints, backlog, intake]   # intake = stories planned for upload that are not in Jira yet
   ignore_statuses: [Done, Closed]
   issue_types: [Story, Spike]    # the real type names are mapped on the Fed side
 
@@ -35,12 +43,14 @@ fields:
       # Capital letters do not matter.
       pattern: "as an? .+?,? i (want|need) .+?,? so that .+"
       allowed_roles: []          # empty means any role is accepted; fill in on the Fed side
+    brief_chars: 50              # shorter than this (but not flagged as short) is "brief": a low-severity nudge. 0 turns it off
 
   acceptance_criteria:
     required: true
     min_chars: 21                # 20 characters or fewer gets flagged
     # If the text is only these phrases, it is flagged as vague.
     vague_phrases: ["tbd", "to be determined", "works as expected", "should work", "as expected", "n/a"]
+    brief_chars: 50              # shorter than this (but not flagged as short) is "brief": a low-severity nudge. 0 turns it off
 
   story_points:
     required: true
@@ -166,8 +176,73 @@ confluence:
     summary: refiner-summary
     labels: refiner-labels
     not_checked: refiner-not-checked
+    epics: refiner-epics
+    themes: refiner-themes
   # A sentence at the bottom of the summary section saying where the workbook is.
   workbook_note: "The workbook with every story, finding and suggestion is attached to the pipeline run that published this page."
+
+# ---------------------------------------------------------------------------
+# Titles (the Summary field). A title that does not fit its description gets a suggested one.
+# ---------------------------------------------------------------------------
+titles:
+  max_chars: 90                 # a longer title is flagged
+  suggest: true                 # draft a title from the description when the title is missing, short, long or does not fit
+
+# ---------------------------------------------------------------------------
+# Epics. Every story should belong to a current or future epic.
+# ---------------------------------------------------------------------------
+epics:
+  enabled: true
+  required_groups: [current_sprint, future_sprints, backlog, intake]   # stories here MUST have an epic
+  ignore_statuses: [Done, Closed]   # epics in these statuses are finished, so they are not suggested
+  min_match_score: 0.5          # how much of an epic's name must appear in a story before the epic is suggested (0 to 1)
+  suggest_new: true             # suggest new epics for groups of stories that fit no existing epic
+  new_epic_min_stories: 3       # how many stories must share a word before a new epic is suggested
+  today: ""                     # "2026-12-01" pretends it is that day; "" means today
+
+# ---------------------------------------------------------------------------
+# Duplicates. Titles (and descriptions, when both stories have one) are compared.
+# At or above duplicate_at the stories are "possible duplicates" and are flagged.
+# Between related_at and duplicate_at they are "related": fine, and listed so you can group them.
+# ---------------------------------------------------------------------------
+duplicates:
+  enabled: true
+  duplicate_at: 0.8             # 0 to 1. 1 means identical topic words
+  related_at: 0.5
+  min_title_words: 2            # a title needs at least this many meaningful words to be compared
+  title_weight: 3               # how much the title counts when the description is compared too
+  description_weight: 2
+
+# ---------------------------------------------------------------------------
+# Labels. Fill these in to match how your team labels stories. Matching ignores capital letters.
+# ---------------------------------------------------------------------------
+labels:
+  enabled: true
+  required_all: []              # labels EVERY story needs, for example the team label: [my-team]
+  allowed: []                   # if set, any other label is flagged. Empty means any label is fine
+  # Suggest a label when a story mentions certain words. Example:
+  #   suggest:
+  #     - label: terraform
+  #       words: [terraform]
+  suggest: []
+
+# ---------------------------------------------------------------------------
+# Themes. Several stories about the same thing can start their titles the same way, so they sort together.
+# ---------------------------------------------------------------------------
+themes:
+  enabled: true
+  min_stories: 3                # a word in this many titles is a theme
+  # Technology or tool names that should start a title. ONLY these rewrite titles. They also keep their capital
+  # letter in drafted sentences. This is a starter example: add your own, for example [terraform, ansible, kubernetes].
+  known: [terraform]
+  max_auto_themes: 5            # also LIST up to this many frequent words as possible themes (listed only, never rewritten)
+  title_format: "{theme}: {title}"   # how a prefixed title is written. Keep both {theme} and {title}
+
+# ---------------------------------------------------------------------------
+# The update pack: one HTML page with a table of fields to copy into Jira.
+# ---------------------------------------------------------------------------
+update_pack:
+  copy_buttons: true            # true adds a small Copy button. false uses no script (click a box to select it)
 
 # ---------------------------------------------------------------------------
 # Skip some checks for one issue type. Example, to skip the "As a..." check for spikes:
@@ -193,6 +268,15 @@ severity:
   other_required_missing: low
   large_and_thin: high
   possibly_undersized: medium
+  description_brief: low
+  ac_brief: low
+  title_long: low
+  epic_missing: high
+  epic_inactive: medium
+  duplicate_story: high
+  labels_missing: medium
+  label_unknown: low
+  labels_suggested: low
 
 # ---------------------------------------------------------------------------
 # Cell colors in the workbook for each severity (6-digit codes, keep the quotes).
